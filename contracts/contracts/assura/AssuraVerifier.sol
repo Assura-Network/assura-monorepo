@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {IAssuraVerifier, VerifyingData} from "./IAssuraVerifier.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
 struct ActualAttestedData {
     uint256 score;
@@ -16,14 +18,20 @@ struct ComplianceData {
     ActualAttestedData actualAttestedData;
 }
 
-contract AssuraVerifier is IAssuraVerifier {
+contract AssuraVerifier is IAssuraVerifier, EIP712 {
     mapping(address appContractAddress => mapping(bytes32 key => VerifyingData))
         public verifyingData;
 
     address public owner;
     address public ASSURA_TEE_ADDRESS;
 
-    constructor(address _owner, address _ASSURA_TEE_ADDRESS) {
+    // EIP-712 type hash for ActualAttestedData
+    bytes32 public constant ACTUAL_ATTESTED_DATA_TYPEHASH = 
+        keccak256("ActualAttestedData(uint256 score,uint256 timeAtWhichAttested,uint256 chainId)");
+
+    constructor(address _owner, address _ASSURA_TEE_ADDRESS) 
+        EIP712("AssuraVerifier", "1")
+    {
         require(_owner != address(0), "Owner cannot be 0");
         owner = _owner;
         ASSURA_TEE_ADDRESS = _ASSURA_TEE_ADDRESS;
@@ -68,32 +76,41 @@ contract AssuraVerifier is IAssuraVerifier {
         // Verify the key matches
         require(data.key == key, "Key mismatch");
         
-        // Verify TEE signature
-        bytes32 hash = keccak256(
+        bytes memory signature = data.signedAttestedDataWithTEESignature;
+        
+        // Compute hash for EIP-191 format (backward compatibility)
+        bytes32 eip191Hash = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
                 keccak256(abi.encode(data.actualAttestedData))
             )
         );
         
-        bytes memory signature = data.signedAttestedDataWithTEESignature;
-        require(signature.length == 65, "Invalid signature length");
+        // Compute hash for EIP-712 format
+        bytes32 eip712Hash = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    ACTUAL_ATTESTED_DATA_TYPEHASH,
+                    data.actualAttestedData.score,
+                    data.actualAttestedData.timeAtWhichAttested,
+                    data.actualAttestedData.chainId
+                )
+            )
+        );
         
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
+        // Try EIP-712 first, then fall back to EIP-191
+        // SignatureChecker handles both EIP-1271 (smart contract wallets) and ECDSA (EOAs)
+        bool isValid = SignatureChecker.isValidSignatureNow(
+            ASSURA_TEE_ADDRESS,
+            eip712Hash,
+            signature
+        ) || SignatureChecker.isValidSignatureNow(
+            ASSURA_TEE_ADDRESS,
+            eip191Hash,
+            signature
+        );
         
-        // Extract r, s, v from signature bytes
-        assembly {
-            r := mload(add(signature, 32))
-            s := mload(add(signature, 64))
-            v := byte(0, mload(add(signature, 96)))
-        }
-        
-        // Recover signer from signature
-        address signer = ecrecover(hash, v, r, s);
-        require(signer != address(0), "Invalid signature");
-        require(signer == ASSURA_TEE_ADDRESS, "Signature not from TEE");
+        require(isValid, "Signature not from TEE");
         
         // Check chainId from actualAttestedData (0 means any chain)
         if (vData.chainId != 0 && data.actualAttestedData.chainId != block.chainid) {
