@@ -1,19 +1,29 @@
 # Use a base image compatible with ROFL TEE containers
-FROM alpine:latest
+FROM node:20-alpine
+
+# Install build dependencies for better-sqlite3
+RUN apk add --no-cache python3 make g++ sqlite
 
 # Set working directory
 WORKDIR /app
 
-# Install any dependencies your application needs
-# For example, if you need Python:
-# RUN apk add --no-cache python3 py3-pip
-# Or if you need Node.js:
-# RUN apk add --no-cache nodejs npm
+# Copy package files
+COPY package.json yarn.lock* ./
 
-# Copy your application files (adjust as needed)
-# COPY . .
+# Install dependencies including tsx for running TypeScript
+RUN yarn add -D tsx && yarn install --frozen-lockfile
 
-# Set the command to run your application
-# Replace this with your actual application entrypoint
-CMD ["sh", "-c", "echo 'ROFL container started' && sleep infinity"]
+# Copy source code
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Set environment variables
+ENV PORT=3000
+ENV DB_PATH=/root/.my-volume/database.db
+ENV NODE_ENV=production
+
+# Start the server using tsx to run TypeScript directly
+CMD ["yarn", "tsx", "src/start.ts"]
 

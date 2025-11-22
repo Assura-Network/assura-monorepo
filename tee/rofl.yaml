@@ -32,12 +32,15 @@ deployments:
           min_tcb_evaluation_data_number: 18
           tdx: {}
       enclaves:
-        - id: me/sQ5pzk2dIC6i0E2cbuNDgdsRgkEonY0mQHG/U/+oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
-        - id: ZiwzgkvSqZdfMQ1G8GO8fqcO0Vro9XeZpQJbSdWCPvcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+        - id: olE6yE9nYEirZjgtHVs/2MqTVrqsW1Yk9+LI+SB8SK4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+        - id: P70oMMGFOctP7EyTsEuzHJgcUt4VIaKkERfehrU3nPsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
       endorsements:
         - any: {}
       fees: endorsing_node
       max_expiration: 3
+    secrets:
+      - name: PRIVATE_KEY
+        value: pGJwa1ggYRS0rAed3/0tKt1ZoMMOeijIEOnAk5hANJsd94hTmj5kbmFtZVgbbWto6S085F2JKQLSTuh88BmSpjoCRfoiLc9bZW5vbmNlTynpNdp1uCk0Aen+n80hg2V2YWx1ZVhSecfM8r93vCQ1E7JNV05p0/J/xc0i2vjLtzdi0hMXAFkin+TqKOhXZtZHVnTwQ2ykzQpgj9BmRibFLsJE1qovUBZp67i4vKFaUkxh1KAZ1814dw==
     machines:
       default:
         provider: oasis1qp2ens0hsp7gh23wajxa4hpetkdek3swyyulyrmz
