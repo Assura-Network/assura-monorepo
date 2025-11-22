@@ -6,16 +6,16 @@ import { AbstractPainting } from "@/components/abstract-painting";
 
 export default function AbstractPaintingHeroPage() {
   return (
-    <main className="flex h-screen w-full items-center justify-center bg-black">
+    <main className="flex w-full items-center justify-center">
       <div className="relative z-10 w-full">
         <div
           className={cn(
-            "relative overflow-hidden rounded-3xl",
-            "border border-white/20 dark:border-white/10",
+            "relative overflow-hidden",
+            "",
             "bg-white/5 dark:bg-black/5",
             "shadow-[0_8px_32px_rgba(0,0,0,0.08)]",
             "backdrop-blur-sm",
-            "h-screen"
+            "h-[150vh]"
           )}
         >
           {/* Abstract Painting Background */}
