@@ -8,7 +8,7 @@ contract CounterTest is Test {
   Counter counter;
 
   function setUp() public {
-    counter = new Counter();
+    counter = new Counter(address(0));
   }
 
   function test_InitialValue() public view {
@@ -17,13 +17,13 @@ contract CounterTest is Test {
 
   function testFuzz_Inc(uint8 x) public {
     for (uint8 i = 0; i < x; i++) {
-      counter.inc();
+      counter.inc(abi.encode(1));
     }
     require(counter.x() == x, "Value after calling inc x times should be x");
   }
 
   function test_IncByZero() public {
     vm.expectRevert();
-    counter.incBy(0);
+    counter.incBy(0, abi.encode(1));
   }
 }

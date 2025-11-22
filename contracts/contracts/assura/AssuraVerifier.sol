@@ -12,7 +12,7 @@ struct ActualAttestedData {
 struct ComplianceData {
     address userAddress;
     bytes32 key;
-    bytes signedAttestedDataWithSignature; // use ActualAttestedData struct to sign and decode onchain
+    bytes signedAttestedDataWithTEESignature; // use ActualAttestedData struct to sign and decode onchain
     ActualAttestedData actualAttestedData;
 }
 
@@ -21,10 +21,12 @@ contract AssuraVerifier is IAssuraVerifier {
         public verifyingData;
 
     address public owner;
+    address public ASSURA_TEE_ADDRESS;
 
-    constructor(address _owner) {
+    constructor(address _owner, address _ASSURA_TEE_ADDRESS) {
         require(_owner != address(0), "Owner cannot be 0");
         owner = _owner;
+        ASSURA_TEE_ADDRESS = _ASSURA_TEE_ADDRESS;
     }
 
     function setVerifyingData(
@@ -42,11 +44,11 @@ contract AssuraVerifier is IAssuraVerifier {
     ) external view override returns (VerifyingData memory) {
         return verifyingData[appContractAddress][key];
     }
-
+    
     function verify(
         address app,
         bytes32 key,
-        bytes calldata attestedData
+        bytes calldata attestedComplianceData
     ) external view override returns (bool) {
         VerifyingData memory vData = verifyingData[app][key];
         
@@ -60,19 +62,54 @@ contract AssuraVerifier is IAssuraVerifier {
             return false;
         }
         
-        // Decode attestedData to get the score
-        // Assuming attestedData is encoded ActualAttestedData struct
-        require(attestedData.length >= 96, "Invalid attested data length");
-        uint256 attestedScore;
+        // Decode complianceData bytes calldata to ComplianceData struct
+        ComplianceData memory data = abi.decode(attestedComplianceData, (ComplianceData));
+        
+        // Verify the key matches
+        require(data.key == key, "Key mismatch");
+        
+        // Verify TEE signature
+        bytes32 hash = keccak256(
+            abi.encodePacked(
+                "\x19Ethereum Signed Message:\n32",
+                keccak256(abi.encode(data.actualAttestedData))
+            )
+        );
+        
+        bytes memory signature = data.signedAttestedDataWithTEESignature;
+        require(signature.length == 65, "Invalid signature length");
+        
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        
+        // Extract r, s, v from signature bytes
         assembly {
-            attestedScore := calldataload(add(attestedData.offset, 0))
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        
+        // Recover signer from signature
+        address signer = ecrecover(hash, v, r, s);
+        require(signer != address(0), "Invalid signature");
+        require(signer == ASSURA_TEE_ADDRESS, "Signature not from TEE");
+        
+        // Check chainId from actualAttestedData (0 means any chain)
+        if (vData.chainId != 0 && data.actualAttestedData.chainId != block.chainid) {
+            return false;
         }
         
         // Check score requirement
-        if (attestedScore < vData.score) {
+        if (data.actualAttestedData.score < vData.score) {
             return false;
         }
         
         return true;
+    }
+
+    function updateAssuraTeeAddress(address _ASSURA_TEE_ADDRESS) external {
+        require(msg.sender == owner, "Only owner can update ASSURA_TEE_ADDRESS");
+        ASSURA_TEE_ADDRESS = _ASSURA_TEE_ADDRESS;
     }
 }

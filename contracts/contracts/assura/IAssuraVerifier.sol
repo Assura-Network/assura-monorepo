@@ -12,5 +12,5 @@ interface IAssuraVerifier {
 
     function getVerifyingData(address app, bytes32 key) external view returns (VerifyingData memory);
 
-    function verify(address app, bytes32 key, bytes calldata attestedData) external view returns (bool);
+    function verify(address app, bytes32 key, bytes calldata attestedComplianceData) external view returns (bool);
 }
