@@ -1,57 +1,317 @@
-# Sample Hardhat 3 Beta Project (`node:test` and `viem`)
+# Assura - Trusted Execution Environment (TEE) Based Compliance Verification
 
-This project showcases a Hardhat 3 Beta project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+Assura is a smart contract system that enables on-chain compliance verification using attestations signed by a Trusted Execution Environment (TEE). It allows applications to enforce compliance requirements (such as minimum scores, expiry times, and chain-specific rules) while maintaining privacy and security through cryptographic signatures.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## Overview
 
-## Project Overview
+The Assura system consists of two main components:
 
-This example project includes:
+1. **AssuraVerifier**: A central verification contract that validates compliance attestations
+2. **Application Contracts**: Smart contracts (like `Counter`) that use AssuraVerifier to enforce compliance requirements
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+## Architecture
 
-## Usage
+### How It Works
+
+```
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│   TEE       │         │ AssuraVerifier│        │ Application │
+│  (Signer)   │────────▶│   Contract   │◀───────│  Contract   │
+└─────────────┘         └──────────────┘         └─────────────┘
+     │                         │                         │
+     │ Signs                   │ Verifies                │ Enforces
+     │ Attestations            │ Signatures              │ Compliance
+     │                         │                         │
+     └─────────────────────────┴─────────────────────────┘
+                    User submits compliance data
+```
+
+### Key Components
+
+#### 1. AssuraVerifier Contract
+
+The `AssuraVerifier` contract is the core verification system that:
+
+- **Stores Verification Requirements**: Each application contract can register verification requirements (score thresholds, expiry times, chain IDs) for specific functions
+- **Validates TEE Signatures**: Verifies that compliance attestations are signed by the authorized TEE address
+- **Checks Compliance**: Validates that user attestations meet the required criteria
+
+**Key Functions:**
+- `setVerifyingData()`: Allows application contracts to set their verification requirements
+- `verify()`: Validates compliance data and TEE signatures
+- `updateAssuraTeeAddress()`: Allows owner to update the TEE address
+
+#### 2. ComplianceData Structure
+
+When a user wants to interact with a compliance-protected function, they must provide:
+
+```solidity
+struct ComplianceData {
+    address userAddress;                    // The user's address
+    bytes32 key;                            // Function selector (e.g., inc.selector)
+    bytes signedAttestedDataWithTEESignature; // TEE signature over ActualAttestedData
+    ActualAttestedData actualAttestedData;   // The attested data (score, timestamp, chainId)
+}
+```
+
+#### 3. ActualAttestedData Structure
+
+The data that the TEE signs:
+
+```solidity
+struct ActualAttestedData {
+    uint256 score;              // User's compliance score
+    uint256 timeAtWhichAttested; // Timestamp when attestation was created
+    uint256 chainId;            // Chain ID where attestation is valid
+}
+```
+
+#### 4. VerifyingData Structure
+
+Requirements set by application contracts:
+
+```solidity
+struct VerifyingData {
+    uint256 score;    // Minimum required score (0 = no requirement)
+    uint256 expiry;   // Expiry timestamp (0 = no expiry)
+    uint256 chainId;  // Required chain ID (0 = any chain)
+}
+```
+
+## Verification Flow
+
+### Step-by-Step Process
+
+1. **TEE Attestation**:
+   - User requests compliance attestation from TEE
+   - TEE evaluates user's compliance status and generates `ActualAttestedData`
+   - TEE signs the data using EIP-191 format: `keccak256("\x19Ethereum Signed Message:\n32" || keccak256(abi.encode(actualAttestedData)))`
+   - TEE returns signature to user
+
+2. **User Prepares Compliance Data**:
+   - User creates `ComplianceData` struct with:
+     - Their address
+     - Function selector (key)
+     - TEE signature
+     - The attested data
+   - Encodes it: `bytes complianceData = abi.encode(complianceData)`
+
+3. **User Calls Application Function**:
+   - User calls the application function (e.g., `counter.inc(complianceData)`)
+   - Function uses `onlyComplianceUser` modifier
+
+4. **Verification Process**:
+   - Modifier calls `assuraVerifier.verify(app, key, complianceData)`
+   - AssuraVerifier:
+     - Decodes `ComplianceData` from bytes
+     - Verifies key matches function selector
+     - Recovers signer from TEE signature using `ecrecover`
+     - Validates signer matches `ASSURA_TEE_ADDRESS`
+     - Checks expiry (if set)
+     - Checks chainId (if set)
+     - Validates score meets requirement
+   - Returns `true` if all checks pass
+
+5. **Function Execution**:
+   - If verification passes, function executes
+   - If verification fails, transaction reverts
+
+## Example: Counter Contract
+
+The `Counter` contract demonstrates how to use AssuraVerifier:
+
+### Setup
+
+```solidity
+constructor(address _assuraVerifier) {
+    assuraVerifier = IAssuraVerifier(_assuraVerifier);
+    
+    // Set requirements: inc() requires score >= 100
+    assuraVerifier.setVerifyingData(
+        address(this),
+        this.inc.selector,
+        VerifyingData({score: 100, expiry: 0, chainId: 0})
+    );
+    
+    // Set requirements: incBy() requires score >= 30
+    assuraVerifier.setVerifyingData(
+        address(this),
+        this.incBy.selector,
+        VerifyingData({score: 30, expiry: 0, chainId: 0})
+    );
+}
+```
+
+### Usage
+
+```solidity
+// User must provide valid compliance data
+function inc(bytes calldata attestedData) 
+    public 
+    onlyComplianceUser(this.inc.selector, attestedData) 
+{
+    x++;
+    emit Increment(1);
+}
+```
+
+## Security Features
+
+1. **TEE Signature Verification**: Only attestations signed by the authorized TEE address are accepted
+2. **Key Matching**: Ensures compliance data is for the correct function
+3. **Score Validation**: Enforces minimum compliance scores
+4. **Expiry Checks**: Supports time-limited attestations
+5. **Chain Validation**: Can enforce chain-specific requirements
+6. **Access Control**: Only application contracts can set their own verification data
+
+## Testing
+
+The project includes comprehensive Foundry tests in `contracts/test/Counter.t.sol` that demonstrate:
+
+- Contract deployment
+- Valid compliance attestations
+- Invalid signatures (wrong signer)
+- Insufficient scores
+- Wrong function keys
+- Multiple increments
 
 ### Running Tests
 
-To run all the tests in the project, execute the following command:
-
-```shell
+```bash
+# Run all tests
 npx hardhat test
-```
 
-You can also selectively run the Solidity or `node:test` tests:
-
-```shell
+# Run only Solidity tests
 npx hardhat test solidity
+
+# Run only TypeScript tests
 npx hardhat test nodejs
 ```
 
-### Make a deployment to Sepolia
+## Deployment
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+### Deploy AssuraVerifier
 
-To run the deployment to a local chain:
+1. Deploy `AssuraVerifier` with:
+   - Owner address (can update TEE address)
+   - TEE address (signs attestations)
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```solidity
+AssuraVerifier verifier = new AssuraVerifier(owner, teeAddress);
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+### Deploy Application Contract
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+1. Deploy your application contract with AssuraVerifier address:
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+```solidity
+Counter counter = new Counter(address(verifier));
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+2. The constructor automatically sets verification requirements
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
+## Integration Guide
+
+To integrate Assura into your smart contract:
+
+1. **Import IAssuraVerifier**:
+   ```solidity
+   import {IAssuraVerifier, VerifyingData} from "./assura/IAssuraVerifier.sol";
+   ```
+
+2. **Store Verifier Reference**:
+   ```solidity
+   IAssuraVerifier public assuraVerifier;
+   ```
+
+3. **Set Requirements in Constructor**:
+   ```solidity
+   constructor(address _assuraVerifier) {
+       assuraVerifier = IAssuraVerifier(_assuraVerifier);
+       assuraVerifier.setVerifyingData(
+           address(this),
+           this.myFunction.selector,
+           VerifyingData({score: 50, expiry: 0, chainId: 0})
+       );
+   }
+   ```
+
+4. **Add Compliance Modifier**:
+   ```solidity
+   modifier onlyComplianceUser(bytes32 key, bytes calldata attestedData) {
+       require(
+           assuraVerifier.verify(address(this), key, attestedData),
+           "Not a compliance user"
+       );
+       _;
+   }
+   ```
+
+5. **Protect Functions**:
+   ```solidity
+   function myFunction(bytes calldata attestedData) 
+       public 
+       onlyComplianceUser(this.myFunction.selector, attestedData) 
+   {
+       // Your function logic
+   }
+   ```
+
+## Data Structures Reference
+
+### ComplianceData
+- `userAddress`: Address of the user requesting access
+- `key`: Function selector (bytes32)
+- `signedAttestedDataWithTEESignature`: 65-byte ECDSA signature from TEE
+- `actualAttestedData`: The attested compliance data
+
+### ActualAttestedData
+- `score`: User's compliance score (uint256)
+- `timeAtWhichAttested`: Block timestamp when attestation was created
+- `chainId`: Chain ID where attestation is valid
+
+### VerifyingData
+- `score`: Minimum required score (0 = no requirement)
+- `expiry`: Expiry timestamp (0 = no expiry)
+- `chainId`: Required chain ID (0 = any chain)
+
+## Signature Format
+
+The TEE signs using EIP-191 standard:
+
 ```
+hash = keccak256(
+    abi.encodePacked(
+        "\x19Ethereum Signed Message:\n32",
+        keccak256(abi.encode(actualAttestedData))
+    )
+)
+```
+
+Signature is 65 bytes: `r` (32 bytes) + `s` (32 bytes) + `v` (1 byte)
+
+## Project Structure
+
+```
+contracts/
+├── contracts/
+│   ├── assura/
+│   │   ├── AssuraVerifier.sol    # Main verification contract
+│   │   └── IAssuraVerifier.sol   # Interface
+│   ├── Counter.sol               # Example application contract
+│   └── test/
+│       └── Counter.t.sol         # Comprehensive test suite
+└── README.md                      # This file
+```
+
+## Future Enhancements
+
+- Support for multiple TEE addresses
+- Revocation mechanisms for attestations
+- Batch verification for multiple functions
+- Gas optimization improvements
+- Additional compliance criteria types
+
+## License
+
+UNLICENSED
