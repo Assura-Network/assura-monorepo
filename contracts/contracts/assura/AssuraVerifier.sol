@@ -2,24 +2,45 @@
 pragma solidity ^0.8.28;
 
 contract AssuraVerifier {
-
     struct VerifyingData {
         uint256 score;
-        uint256 timestamp;
+        uint256 expiry;
+        uint256 chainId;
     }
 
-    mapping(address => mapping(address => VerifyingData)) public verifyingData;
-
-    function setVerifyingData(address user, address app, uint256 score, uint256 timestamp) public {
-        verifyingData[user][app] = VerifyingData(score, timestamp);
+    struct ComplianceUser {
+        address user;
+        bytes32 key;
+        bytes attestedData;
     }
 
-    function getVerifyingData(address user, address app) public view returns (VerifyingData memory) {
-        return verifyingData[user][app];
+    mapping(address appContractAddress => mapping(bytes32 key => VerifyingData))
+        public verifyingData;
+
+    constructor(address _owner, address _appContractAddress) {
+        addres owner = _owner;
+        require(_owner != address(0), "Owner cannot be 0");
+        owner = _owner;
     }
 
-    function verify(address user, address app) public view returns (bool) {
-        VerifyingData memory verifyingData = getVerifyingData(user, app);
-        return verifyingData.score > 0 && verifyingData.timestamp > 0;
+    function setVerifyingData(
+        address appContractAddress,
+        bytes32 key,
+        VerifyingData memory verifyingData
+    ) public {
+        require(msg.sender == appContractAddress, "Only owner can set verifying data");
+        verifyingData[appContractAddress][key] = verifyingData;
     }
+
+    function getVerifyingData(
+        address appContractAddress,
+        bytes32 key
+    ) public view returns (VerifyingData memory) {
+        return verifyingData[appContractAddress][key];
+    }
+
+    function verify(address appContractAddress, bytes32 key, bytes calldata attestedData) public view returns (bool) {
+        return true;
+    }
+
 }

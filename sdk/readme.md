@@ -39,5 +39,4 @@ Intermediate controlled account ( with self custody )
 Other compliance rules
 This allows your application to be fully programmable from deployment or initialization, with compliance deeply integrated and enforced automatically.
 
-
 create a next 
