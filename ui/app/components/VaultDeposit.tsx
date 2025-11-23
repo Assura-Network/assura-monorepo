@@ -124,14 +124,14 @@ export default function VaultDeposit() {
                 <span className="text-muted-foreground">TVL </span>
                 <span className="text-foreground">$12.4M</span>
               </div>
-              {balance && (
+              {/* {balance && (
                 <div>
                   <span className="text-muted-foreground">Available </span>
                   <span className="text-foreground">
                     {parseFloat(formatUnits(balance.value, balance.decimals)).toFixed(4)} {selectedToken.symbol}
                   </span>
                 </div>
-              )}
+              )} */}
             </div>
           </div>
 
