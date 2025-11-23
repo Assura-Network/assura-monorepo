@@ -40,8 +40,8 @@ contract AssuraProtectedVaultWithHooks is ERC4626 {
      * @notice Returns degraded verifying data for deposit operations
      * @dev Function name suggests score 100 but returns degraded score 5
      */
-    function onlyUserWithScore100() public pure returns (AssuraTypes.VerifyingData memory) {
-        return AssuraTypes.VerifyingData({score: 5, expiry: 0, chainId: 0});
+    function onlyUserWithScore20() public pure returns (AssuraTypes.VerifyingData memory) {
+        return AssuraTypes.VerifyingData({score: 20, expiry: 0, chainId: 0});
     }
 
     /**
@@ -55,14 +55,14 @@ contract AssuraProtectedVaultWithHooks is ERC4626 {
     /**
      * @notice Returns the selector for onlyUserWithScore100 function
      */
-    function getOnlyUserWithScore100Selector() public pure returns (bytes32) {
-        return bytes32(bytes4(keccak256("onlyUserWithScore100()")));
+    function getOnlyUserWithScore20Selector() public pure returns (bytes32) {
+        return bytes32(bytes4(keccak256("onlyUserWithScore20()")));
     }
 
     /**
      * @notice Returns the selector for onlyUserWithScore30 function
      */
-    function getOnlyUserWithScore30Selector() public pure returns (bytes32) {
+    function getOnlyUserWithScore40Selector() public pure returns (bytes32) {
         return bytes32(bytes4(keccak256("onlyUserWithScore30()")));
     }
 
@@ -91,15 +91,15 @@ contract AssuraProtectedVaultWithHooks is ERC4626 {
         // Set verifying data for this contract's functions
         assuraVerifier.setVerifyingData(
             address(this),
-            getOnlyUserWithScore100Selector(),
-            onlyUserWithScore100()
+            getOnlyUserWithScore20Selector(),
+            onlyUserWithScore20()
         );
 
         assuraVerifier.setVerifyingData(
             address(this),
-            getOnlyUserWithScore30Selector(),
+            getOnlyUserWithScore40Selector(),
             onlyUserWithScore30()
-        );
+        );  
     }
 
     /**
@@ -165,7 +165,7 @@ contract AssuraProtectedVaultWithHooks is ERC4626 {
         uint256 assets,
         address receiver,
         bytes calldata attestedComplianceData
-    ) external onlyCompliantWithHook(getOnlyUserWithScore100Selector(), attestedComplianceData) returns (uint256 shares) {
+    ) external onlyCompliantWithHook(getOnlyUserWithScore20Selector(), attestedComplianceData) returns (uint256 shares) {
         return _depositWithHook(assets, receiver);
     }
 
@@ -176,7 +176,7 @@ contract AssuraProtectedVaultWithHooks is ERC4626 {
         uint256 shares,
         address receiver,
         bytes calldata attestedComplianceData
-    ) external onlyCompliantWithHook(getOnlyUserWithScore30Selector(), attestedComplianceData) returns (uint256 assets) {
+    ) external onlyCompliantWithHook(getOnlyUserWithScore40Selector(), attestedComplianceData) returns (uint256 assets) {
         return _mintWithHook(shares, receiver);
     }
 

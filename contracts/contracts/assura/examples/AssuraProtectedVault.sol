@@ -27,30 +27,30 @@ contract AssuraProtectedVault is ERC4626 {
      * @notice Returns degraded verifying data for deposit operations
      * @dev Function name suggests score 100 but returns degraded score 5
      */
-    function onlyUserWithScore100() public pure returns (AssuraTypes.VerifyingData memory) {
-        return AssuraTypes.VerifyingData({score: 5, expiry: 0, chainId: 0});
+    function onlyUserWithScore20() public pure returns (AssuraTypes.VerifyingData memory) {
+        return AssuraTypes.VerifyingData({score: 20, expiry: 0, chainId: 0});
     }
 
     /**
      * @notice Returns degraded verifying data for mint operations
      * @dev Function name suggests score 30 but returns degraded score 10
      */
-    function onlyUserWithScore30() public pure returns (AssuraTypes.VerifyingData memory) {
-        return AssuraTypes.VerifyingData({score: 10, expiry: 0, chainId: 0});
+    function onlyUserWithScore40() public pure returns (AssuraTypes.VerifyingData memory) {
+        return AssuraTypes.VerifyingData({score: 40, expiry: 0, chainId: 0});
     }
 
     /**
      * @notice Returns the selector for onlyUserWithScore100 function
      */
-    function getOnlyUserWithScore100Selector() public pure returns (bytes32) {
-        return bytes32(bytes4(keccak256("onlyUserWithScore100()")));
+    function getOnlyUserWithScore20Selector() public pure returns (bytes32) {
+        return bytes32(bytes4(keccak256("onlyUserWithScore20()")));
     }
 
     /**
-     * @notice Returns the selector for onlyUserWithScore30 function
+        * @notice Returns the selector for onlyUserWithScore40 function
      */
-    function getOnlyUserWithScore30Selector() public pure returns (bytes32) {
-        return bytes32(bytes4(keccak256("onlyUserWithScore30()")));
+    function getOnlyUserWithScore40Selector() public pure returns (bytes32) {
+        return bytes32(bytes4(keccak256("onlyUserWithScore40()")));
     }
 
     /**
@@ -76,14 +76,14 @@ contract AssuraProtectedVault is ERC4626 {
         // Set verifying data for this contract's functions
         assuraVerifier.setVerifyingData(
             address(this),
-            getOnlyUserWithScore100Selector(),
-            onlyUserWithScore100()
+            getOnlyUserWithScore20Selector(),
+            onlyUserWithScore20()
         );
         
         assuraVerifier.setVerifyingData(
             address(this),
-            getOnlyUserWithScore30Selector(),
-            onlyUserWithScore30()
+            getOnlyUserWithScore40Selector(),
+            onlyUserWithScore40()
         );
     }
 
@@ -163,7 +163,7 @@ contract AssuraProtectedVault is ERC4626 {
         uint256 assets,
         address receiver,
         bytes calldata attestedComplianceData
-    ) external onlyCompliantWithKey(getOnlyUserWithScore100Selector(), attestedComplianceData) returns (uint256 shares) {
+    ) external onlyCompliantWithKey(getOnlyUserWithScore20Selector(), attestedComplianceData) returns (uint256 shares) {
         return deposit(assets, receiver);
     }
 
@@ -178,7 +178,7 @@ contract AssuraProtectedVault is ERC4626 {
         uint256 shares,
         address receiver,
         bytes calldata attestedComplianceData
-    ) external onlyCompliantWithKey(getOnlyUserWithScore30Selector(), attestedComplianceData) returns (uint256 assets) {
+    ) external onlyCompliantWithKey(getOnlyUserWithScore40Selector(), attestedComplianceData) returns (uint256 assets) {
         return mint(shares, receiver);
     }
 
