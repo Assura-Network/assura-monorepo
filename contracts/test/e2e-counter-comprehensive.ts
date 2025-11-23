@@ -271,8 +271,8 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
       }
     }
 
-    assert.equal(owner.toLowerCase(), ownerAddress.toLowerCase());
-    assert.equal(teeAddr.toLowerCase(), teeAddress.toLowerCase());
+    assert.equal(owner!.toLowerCase(), ownerAddress.toLowerCase());
+    assert.equal(teeAddr!.toLowerCase(), teeAddress.toLowerCase());
   });
 
   it("Should deploy Counter contract", async function () {

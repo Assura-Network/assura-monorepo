@@ -9,7 +9,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  */
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {
-        _mint(msg.sender, 1000000 * 10**18); // Mint 1M tokens to deployer
+        _mint(msg.sender, 1000000 * 10**6); // Mint 1M tokens (6 decimals) to deployer
     }
 
     /**
@@ -17,6 +17,13 @@ contract MockERC20 is ERC20 {
      */
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
+    }
+
+    /**
+     * @dev Override decimals to make this token use 6 decimals
+     */
+    function decimals() public pure override returns (uint8) {
+        return 6;
     }
 }
 

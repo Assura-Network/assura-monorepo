@@ -26,14 +26,14 @@ contract VaultTest is Test {
             admin
         );
         
-        // Give users some tokens
-        asset.mint(user1, 1000 * 10**18);
-        asset.mint(user2, 1000 * 10**18);
-        asset.mint(admin, 1000 * 10**18);
+        // Give users some tokens (6 decimals)
+        asset.mint(user1, 1000 * 10**6);
+        asset.mint(user2, 1000 * 10**6);
+        asset.mint(admin, 1000 * 10**6);
     }
 
     function test_Deposit() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         
         // User1 approves vault to spend tokens
         vm.prank(user1);
@@ -56,7 +56,7 @@ contract VaultTest is Test {
         vm.prank(admin);
         vault.setEntryFeeRecipient(feeRecipient);
         
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         uint256 initialFeeBalance = asset.balanceOf(feeRecipient);
         
         // User1 approves and deposits
@@ -77,7 +77,7 @@ contract VaultTest is Test {
     }
 
     function test_Withdraw() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         
         // User1 deposits
         vm.startPrank(user1);
@@ -90,13 +90,13 @@ contract VaultTest is Test {
         vault.withdraw(depositAmount, user1, user1);
         
         // Check withdrawal
-        assertEq(asset.balanceOf(user1), 1000 * 10**18, "User1 should have their tokens back");
+        assertEq(asset.balanceOf(user1), 1000 * 10**6, "User1 should have their tokens back");
         assertEq(vault.totalAssets(), 0, "Vault should be empty");
         assertEq(vault.balanceOf(user1), 0, "User1 should have no shares");
     }
 
     function test_Mint() public {
-        uint256 sharesToMint = 100 * 10**18;
+        uint256 sharesToMint = 100 * 10**6;
         
         // User1 mints shares
         vm.startPrank(user1);
@@ -110,7 +110,7 @@ contract VaultTest is Test {
     }
 
     function test_Redeem() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         
         // User1 deposits
         vm.startPrank(user1);
@@ -124,12 +124,12 @@ contract VaultTest is Test {
         
         // Check redemption
         assertEq(assets, depositAmount, "Should redeem the same amount");
-        assertEq(asset.balanceOf(user1), 1000 * 10**18, "User1 should have their tokens back");
+        assertEq(asset.balanceOf(user1), 1000 * 10**6, "User1 should have their tokens back");
         assertEq(vault.balanceOf(user1), 0, "User1 should have no shares");
     }
 
     function test_ExchangeRate() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         
         // User1 deposits
         vm.startPrank(user1);
@@ -146,8 +146,8 @@ contract VaultTest is Test {
     }
 
     function test_MultipleUsers() public {
-        uint256 deposit1 = 100 * 10**18;
-        uint256 deposit2 = 200 * 10**18;
+        uint256 deposit1 = 100 * 10**6;
+        uint256 deposit2 = 200 * 10**6;
         
         // User1 deposits
         vm.startPrank(user1);
@@ -168,7 +168,7 @@ contract VaultTest is Test {
     }
 
     function test_WithdrawWithFee() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         
         // Set exit fee to 1% (100 basis points) before deposit
         vm.prank(admin);
@@ -208,7 +208,7 @@ contract VaultTest is Test {
     }
 
     function test_PauseUnpause() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 * 10**6;
         
         // Pause the vault
         vm.prank(admin);

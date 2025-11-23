@@ -349,7 +349,7 @@ describe("E2E Test for AssuraProtectedVault on Base Sepolia", async function () 
   it("Should approve vault to spend user tokens", async function () {
     console.log("\n=== Approving Vault ===");
 
-    const approveAmount = 1000000n * 10n ** 18n; // 1M tokens
+    const approveAmount = 1000000n * 10n ** 6n; // 1M tokens (6 decimals)
 
     // Check user balance
     const userBalance = await mockERC20Contract.read.balanceOf([userAccount.address]);
@@ -385,7 +385,7 @@ describe("E2E Test for AssuraProtectedVault on Base Sepolia", async function () 
       throw new Error("Contracts not initialized. Previous tests must have failed.");
     }
 
-    const depositAmount = 1000n * 10n ** 18n; // 1000 tokens
+    const depositAmount = 1000n * 10n ** 6n; // 1000 tokens (6 decimals)
     const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
     // Create attested data with sufficient score
@@ -474,7 +474,7 @@ describe("E2E Test for AssuraProtectedVault on Base Sepolia", async function () 
       throw new Error("Contracts not initialized. Previous tests must have failed.");
     }
 
-    const sharesToMint = 500n * 10n ** 18n; // 500 shares
+    const sharesToMint = 500n * 10n ** 6n; // 500 shares (6 decimals)
     const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
     // Create attested data with sufficient score
@@ -558,7 +558,7 @@ describe("E2E Test for AssuraProtectedVault on Base Sepolia", async function () 
       throw new Error("Vault contract not initialized. Previous tests must have failed.");
     }
 
-    const depositAmount = 100n * 10n ** 18n;
+    const depositAmount = 100n * 10n ** 6n; // 100 tokens (6 decimals)
     const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
     // Create attested data with insufficient score (less than minScore of 50)
