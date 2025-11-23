@@ -12,6 +12,7 @@ import { MenuIcon, XIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Button } from '../ui/button';
 import { ThemeToggle } from '../ThemeToggle';
+import Link from 'next/link';
 
 export default function Header() {
     const header = useRef<HTMLDivElement>(null);
@@ -61,12 +62,13 @@ export default function Header() {
                     <span className="text-2xl font-medium -ml-5">Assura</span>
                 </div>
                 <div className="flex items-center gap-4">
+                    <Link href="https://app.assura.network">
                     <Button
                         variant="outline"
                         className="rounded-full cursor-pointer py-6 px-6 bg-foreground text-background hover:bg-foreground/90 hover:text-background border-none shadow-none dark:bg-foreground dark:text-background dark:hover:bg-foreground/90 dark:hover:text-background"
                     >
                         Launch app
-                    </Button>
+                    </Button></Link>
                     <ThemeToggle />
                 </div>
             </div>
