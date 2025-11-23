@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
+import { Check } from 'lucide-react'
 import { CustomConnectButton } from './CustomConnectButton'
-import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
+import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract, usePublicClient } from 'wagmi'
 import { formatUnits, parseUnits } from 'viem'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -19,6 +20,7 @@ import {
 } from './ui/alert-dialog'
 import { TOKENS, IMAGE_PATHS, CONTRACT_ADDRESSES, currentChain } from '@/lib/constants'
 import { createComplianceData } from '@/lib/compliance'
+import { formatNumberWithCommas } from '@/lib/utils'
 import { ThemeToggle } from './ThemeToggle'
 
 // Vault ABI - depositWithCompliance function and verificationKey
@@ -112,13 +114,22 @@ export default function VaultDeposit() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [needsApproval, setNeedsApproval] = useState(false)
+  // approvalAmount is tracked internally but not displayed in UI
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [approvalAmount, setApprovalAmount] = useState<bigint | null>(null)
+  const [isApprovalTx, setIsApprovalTx] = useState(false)
+  const [isDepositTx, setIsDepositTx] = useState(false)
+  const [isDepositSuccess, setIsDepositSuccess] = useState(false)
+  const [successTxHash, setSuccessTxHash] = useState<`0x${string}` | undefined>(undefined)
+  const [depositedAmount, setDepositedAmount] = useState<string>('')
   const { address, isConnected, chainId } = useAccount()
 
-  const { writeContract, data: hash, isPending } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
-    hash,
+  const { writeContractAsync, isPending, reset: resetWriteContract } = useWriteContract()
+  const [txHash, setTxHash] = useState<`0x${string}` | undefined>(undefined)
+  const { isLoading: isConfirming, isSuccess, isError: isTxError } = useWaitForTransactionReceipt({
+    hash: txHash,
   })
+  const publicClient = usePublicClient({ chainId: currentChain.id })
 
   const tokenAddress = selectedToken.available && 'address' in selectedToken
     ? selectedToken.address
@@ -128,6 +139,10 @@ export default function VaultDeposit() {
     address,
     token: tokenAddress,
     chainId: currentChain.id,
+    query: {
+      enabled: !!address && !!tokenAddress,
+      refetchInterval: 5000,
+    },
   })
 
   // Read user's shares from vault contract
@@ -147,11 +162,16 @@ export default function VaultDeposit() {
     address: isConnected && !!usdcToken ? address : undefined,
     token: usdcToken && 'address' in usdcToken ? usdcToken.address : undefined,
     chainId: currentChain.id,
+    query: {
+      enabled: !!address && !!usdcToken && isConnected,
+      refetchInterval: 5000,
+    },
   })
 
   const getTokenBalance = (tokenSymbol: string) => {
     if (tokenSymbol === 'USDC' && usdcBalance) {
-      return parseFloat(formatUnits(usdcBalance.value, usdcBalance.decimals)).toFixed(2)
+      const balance = parseFloat(formatUnits(usdcBalance.value, usdcBalance.decimals))
+      return formatNumberWithCommas(balance, 2)
     }
     return '0.00'
   }
@@ -171,13 +191,54 @@ export default function VaultDeposit() {
     setShowDialog(true)
   }
 
-  const handleConfirmDeposit = async () => {
+  // Helper function to sanitize error messages
+  const sanitizeErrorMessage = (error: unknown): string => {
+    if (!error) return 'An unexpected error occurred'
+
+    const errorString = error instanceof Error ? error.message : String(error)
+
+    // Check for common user-friendly error patterns
+    if (errorString.includes('User rejected') || errorString.includes('user rejected')) {
+      return 'Transaction rejected. Please try again.'
+    }
+    if (errorString.includes('insufficient funds') || errorString.includes('Insufficient funds')) {
+      return 'Insufficient funds. Please check your balance.'
+    }
+    if (errorString.includes('reverted')) {
+      return 'Transaction failed. Please try again.'
+    }
+    if (errorString.includes('network') || errorString.includes('Network')) {
+      return 'Network error. Please check your connection.'
+    }
+    if (errorString.includes('timeout') || errorString.includes('Timeout')) {
+      return 'Request timed out. Please try again.'
+    }
+
+    // If it's a very long error message, extract the first meaningful part
+    if (errorString.length > 100) {
+      // Try to find a meaningful substring
+      const shortError = errorString.substring(0, 100)
+      if (shortError.includes('rejected') || shortError.includes('failed')) {
+        return 'Transaction failed. Please try again.'
+      }
+      return 'An error occurred. Please try again.'
+    }
+
+    return errorString
+  }
+
+  const handleConfirmDeposit = async (e?: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+    if (e) {
+      e.preventDefault?.()
+    }
+
     if (!address || !isConnected || !depositAmount || parseFloat(depositAmount) <= 0) {
       return
     }
 
     setIsLoading(true)
     setError(null)
+    setTxHash(undefined) // Clear any previous hash
 
     try {
       if (!selectedToken.available || !('address' in selectedToken) || !selectedToken.address) {
@@ -194,12 +255,10 @@ export default function VaultDeposit() {
       // Convert amount to wei/smallest unit
       const amountInWei = parseUnits(depositAmount, selectedToken.decimals)
 
-      // Read verification key and minScore from vault contract
-      const { createPublicClient, http } = await import('viem')
-      const publicClient = createPublicClient({
-        chain: currentChain,
-        transport: http(),
-      })
+      // Use publicClient from wagmi hook
+      if (!publicClient) {
+        throw new Error('Public client not available')
+      }
 
       const [verificationKey, minScore] = await Promise.all([
         publicClient.readContract({
@@ -245,19 +304,33 @@ export default function VaultDeposit() {
 
         // Set state to show approval is needed
         setNeedsApproval(true)
+        setIsApprovalTx(true)
+        setIsDepositTx(false)
         setApprovalAmount(approveAmount)
+        setError(null) // Clear any previous errors
 
         // Trigger approval transaction
-        writeContract({
-          address: tokenAddress,
-          abi: ERC20_ABI,
-          functionName: 'approve',
-          args: [vaultAddress, approveAmount],
-        })
-
-        setIsLoading(false)
-        return // Exit early, approval transaction will be handled by useEffect
+        try {
+          const approvalHash = await writeContractAsync({
+            address: tokenAddress,
+            abi: ERC20_ABI,
+            functionName: 'approve',
+            args: [vaultAddress, approveAmount],
+          })
+          setTxHash(approvalHash)
+          // Don't exit - let the transaction proceed and handle in useEffect
+          // The useEffect will automatically proceed with deposit after approval
+          return
+        } catch (approvalError) {
+          console.error('Error initiating approval:', approvalError)
+          const errorMessage = sanitizeErrorMessage(approvalError)
+          throw new Error(errorMessage)
+        }
       }
+
+      // Mark as deposit transaction
+      setIsDepositTx(true)
+      setIsApprovalTx(false)
 
       // Prepare attested data
       const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
@@ -308,49 +381,142 @@ export default function VaultDeposit() {
       )
 
       // Deposit with compliance
-      // Note: User must approve the vault contract first to spend tokens
-      // This can be done separately or we can add an approval step here
       console.log('Depositing with compliance...')
-      writeContract({
+      const depositHash = await writeContractAsync({
         address: vaultAddress,
         abi: VAULT_ABI,
         functionName: 'depositWithCompliance',
         args: [amountInWei, address, complianceData],
       })
+      setTxHash(depositHash)
     } catch (err) {
       console.error('Deposit error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to deposit')
+      const errorMessage = sanitizeErrorMessage(err)
+      setError(errorMessage)
       setIsLoading(false)
+      setIsApprovalTx(false)
+      setIsDepositTx(false)
+      setNeedsApproval(false)
     }
   }
 
   // Handle approval success - retry deposit automatically
   useEffect(() => {
-    if (isSuccess && needsApproval && approvalAmount && hash) {
-      // Approval succeeded, wait a bit then retry the deposit
+    if (isSuccess && isApprovalTx && needsApproval && txHash && publicClient) {
+      // Approval succeeded, wait for transaction confirmation then retry deposit
       const retryDeposit = async () => {
-        setNeedsApproval(false)
-        setApprovalAmount(null)
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-        // Retry deposit - trigger it by calling the handler
-        // We'll use a flag to indicate we should proceed with deposit
-        setIsLoading(true)
-        // The actual deposit will happen in the next render cycle
+        try {
+          // Wait for approval transaction to be confirmed on-chain
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+
+          if (receipt.status === 'reverted') {
+            throw new Error('Approval transaction reverted')
+          }
+
+          console.log('Approval transaction confirmed:', receipt.transactionHash)
+
+          // Wait a bit more for state to propagate
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+
+          // Reset approval state but keep dialog open
+          setNeedsApproval(false)
+          setIsApprovalTx(false)
+          setApprovalAmount(null)
+          setIsLoading(false)
+          setError(null) // Clear any previous errors
+
+          // Reset write contract to allow new transaction
+          resetWriteContract()
+          setTxHash(undefined) // Clear previous hash
+
+          // Automatically proceed with deposit - call handleConfirmDeposit
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+
+          // Re-trigger the deposit flow automatically
+          if (address && isConnected && depositAmount && parseFloat(depositAmount) > 0) {
+            console.log('Auto-proceeding with deposit after approval...')
+            // Call handleConfirmDeposit without event (it's optional now)
+            handleConfirmDeposit()
+          }
+        } catch (error) {
+          console.error('Error waiting for approval transaction:', error)
+          const errorMessage = sanitizeErrorMessage(error)
+          setError(errorMessage)
+          setIsLoading(false)
+          setIsApprovalTx(false)
+          setNeedsApproval(false)
+        }
       }
       retryDeposit()
     }
-  }, [isSuccess, needsApproval, approvalAmount, hash])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuccess, isApprovalTx, needsApproval, txHash, resetWriteContract, address, isConnected, depositAmount, publicClient])
 
-  // Update shares display when deposit transaction succeeds (not approval)
+  // Handle deposit success
   useEffect(() => {
-    if (isSuccess && !needsApproval && !isLoading && depositAmount) {
-      // Refetch shares from contract
-      refetchShares()
-      setDepositAmount('')
-      setShowDialog(false)
-      setIsLoading(false)
+    if (isSuccess && isDepositTx && !isApprovalTx && txHash && publicClient && depositAmount) {
+      const handleSuccess = async () => {
+        try {
+          // Wait for deposit transaction to be confirmed on-chain
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+
+          if (receipt.status === 'reverted') {
+            throw new Error('Deposit transaction reverted')
+          }
+
+          console.log('Deposit transaction confirmed:', receipt.transactionHash)
+
+          // Store deposited amount for display BEFORE showing success screen
+          setDepositedAmount(depositAmount)
+
+          // Set success state and store transaction hash immediately
+          setIsDepositSuccess(true)
+          setSuccessTxHash(receipt.transactionHash)
+
+          // Wait a bit more for state to propagate
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+
+          // Refetch shares multiple times to ensure we get updated value (in background)
+          refetchShares()
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          refetchShares()
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          refetchShares()
+
+          // Reset transaction states
+          setIsLoading(false)
+          setIsDepositTx(false)
+          setNeedsApproval(false)
+          setApprovalAmount(null)
+          setError(null) // Clear any errors
+
+          // Reset write contract
+          resetWriteContract()
+          setTxHash(undefined) // Clear hash
+        } catch (error) {
+          console.error('Error waiting for deposit transaction:', error)
+          const errorMessage = sanitizeErrorMessage(error)
+          setError(errorMessage)
+          setIsLoading(false)
+          setIsDepositTx(false)
+        }
+      }
+      handleSuccess()
     }
-  }, [isSuccess, needsApproval, isLoading, depositAmount, refetchShares])
+  }, [isSuccess, isDepositTx, isApprovalTx, txHash, refetchShares, resetWriteContract, publicClient, depositAmount])
+
+  // Handle transaction errors
+  useEffect(() => {
+    if (isTxError && txHash) {
+      setIsLoading(false)
+      setIsApprovalTx(false)
+      setIsDepositTx(false)
+      setNeedsApproval(false)
+      setError('Transaction failed. Please check your wallet and try again.')
+      resetWriteContract()
+      setTxHash(undefined)
+    }
+  }, [isTxError, txHash, resetWriteContract])
 
   const handleMax = () => {
     if (balance) {
@@ -399,8 +565,11 @@ export default function VaultDeposit() {
             <div className="flex items-end gap-4">
               <div className="text-7xl font-light leading-none text-foreground">
                 {userShares !== undefined
-                  ? parseFloat(formatUnits(userShares, selectedToken.decimals)).toFixed(4)
-                  : '0.0000'}
+                  ? formatNumberWithCommas(
+                    parseFloat(formatUnits(userShares, selectedToken.decimals)),
+                    2
+                  )
+                  : '0.00'}
               </div>
               <div className="text-3xl font-light text-muted-foreground pb-2">APV</div>
             </div>
@@ -512,38 +681,86 @@ export default function VaultDeposit() {
       </main>
 
       {/* Deposit Dialog with Form */}
-      <AlertDialog open={showDialog} onOpenChange={setShowDialog}>
-        <AlertDialogContent className="max-w-lg rounded-3xl p-6">
-          <AlertDialogHeader className="mb-4">
-            <div className="flex items-center gap-3 mb-1">
-              <div className="relative w-10 h-10 rounded-full overflow-hidden">
-                <Image
-                  src={selectedToken.image}
-                  alt={selectedToken.name}
-                  fill
-                  className="object-cover"
-                />
+      <AlertDialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          // Prevent closing during processing (approval or deposit)
+          if (!open && (isLoading || isPending || isConfirming || isApprovalTx || isDepositTx)) {
+            return
+          }
+          setShowDialog(open)
+          if (!open) {
+            // Reset states when dialog is closed manually
+            setDepositAmount('')
+            setError(null)
+            setIsLoading(false)
+            setNeedsApproval(false)
+            setIsApprovalTx(false)
+            setIsDepositTx(false)
+            setIsDepositSuccess(false)
+            setSuccessTxHash(undefined)
+            setDepositedAmount('')
+            resetWriteContract()
+          }
+        }}
+      >
+        <AlertDialogContent className={`max-w-lg rounded-3xl p-6 ${isDepositSuccess ? 'bg-foreground border-0' : ''}`}>
+          {isDepositSuccess ? (
+            // Success Screen
+            <div className="flex flex-col items-center justify-center py-8 px-4">
+              {/* Checkmark */}
+              <div className="w-20 h-20 rounded-full bg-background flex items-center justify-center mb-6">
+                <Check className="w-12 h-12 text-foreground" strokeWidth={3} />
               </div>
-              <AlertDialogTitle className="text-3xl font-light">Deposit {selectedToken.symbol}</AlertDialogTitle>
-            </div>
-            <AlertDialogDescription className="text-base font-light text-muted-foreground">
-              Enter the amount to deposit into your vault
-            </AlertDialogDescription>
-          </AlertDialogHeader>
 
-          {error && (
-            <div className="p-4 border border-red-500/50 rounded-3xl bg-red-500/10">
-              <div className="text-sm font-light text-red-500">{error}</div>
-            </div>
-          )}
+              {/* Success Title */}
+              <h2 className="text-3xl font-light text-background mb-4">Deposit Successful</h2>
 
-          <div className="space-y-4">
-            {/* Available Balance */}
-            {balance && (
-              <div className="p-4 border border-border rounded-3xl bg-card/50">
-                <div className="text-xs font-light text-muted-foreground mb-2 uppercase tracking-wider">Available Balance</div>
-                <div className="flex items-center gap-3">
-                  <div className="relative w-8 h-8 rounded-full overflow-hidden">
+              {/* Updated Shares */}
+              <div className="mb-6 text-center">
+                <div className="text-sm font-light text-background/80 mb-1">Received Shares</div>
+                <div className="text-2xl font-light text-background">
+                  {depositedAmount
+                    ? formatNumberWithCommas(parseFloat(depositedAmount), 2)
+                    : userShares !== undefined && userShares > BigInt(0)
+                      ? formatNumberWithCommas(parseFloat(formatUnits(userShares, 18)), 2)
+                      : '0.00'}{' '}
+                  APV
+                </div>
+              </div>
+
+              {/* Block Explorer Link */}
+              {successTxHash && currentChain.blockExplorers?.default?.url && (
+                <a
+                  href={`${currentChain.blockExplorers.default.url}/tx/${successTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-background/90 hover:text-background underline text-sm font-light transition-colors mb-6"
+                >
+                  View on Block Explorer
+                </a>
+              )}
+
+              {/* Close Button */}
+              <Button
+                onClick={() => {
+                  setShowDialog(false)
+                  setIsDepositSuccess(false)
+                  setSuccessTxHash(undefined)
+                  setDepositAmount('')
+                  setDepositedAmount('')
+                }}
+                className="rounded-full font-light h-12 px-8 text-sm bg-background text-foreground hover:bg-background/90"
+              >
+                Close
+              </Button>
+            </div>
+          ) : (
+            // Normal Deposit Form
+            <>
+              <AlertDialogHeader className="mb-4">
+                <div className="flex items-center gap-3 mb-1">
+                  <div className="relative w-10 h-10 rounded-full overflow-hidden">
                     <Image
                       src={selectedToken.image}
                       alt={selectedToken.name}
@@ -551,108 +768,142 @@ export default function VaultDeposit() {
                       className="object-cover"
                     />
                   </div>
-                  <div className="text-2xl font-light text-foreground">
-                    {parseFloat(formatUnits(balance.value, balance.decimals)).toFixed(2)} {selectedToken.symbol}
-                  </div>
+                  <AlertDialogTitle className="text-3xl font-light">Deposit {selectedToken.symbol}</AlertDialogTitle>
                 </div>
-              </div>
-            )}
+                <AlertDialogDescription className="text-base font-light text-muted-foreground">
+                  Enter the amount to deposit into your vault
+                </AlertDialogDescription>
+              </AlertDialogHeader>
 
-            {/* Show Get USDC button if user has no USDC */}
-            {hasNoUSDC && (
-              <div className="p-4 border border-border rounded-3xl bg-card/50">
-                <div className="text-xs font-light text-muted-foreground mb-3 uppercase tracking-wider">No USDC Balance</div>
-                <div className="text-sm font-light text-muted-foreground mb-4">
-                  You need USDC to deposit. Get free testnet USDC from Circle&apos;s faucet.
+              {error && (
+                <div className="p-4 border border-red-500/50 rounded-3xl bg-red-500/10">
+                  <div className="text-sm font-light text-red-500 break-all">{error}</div>
                 </div>
-                <Button
-                  onClick={handleGetUSDC}
-                  variant="outline"
-                  className="w-full h-16 text-base font-light border-2 flex items-center justify-center gap-2"
-                >
-                  <div className="relative overflow-hidden">
-                    <Image
-                      src={IMAGE_PATHS.chains.baseSepolia}
-                      alt="Base"
-                      width={24}
-                      height={24}
-                    />
-                  </div>
-                  Get USDC on Base Sepolia
-                </Button>
-              </div>
-            )}
+              )}
 
-            {/* Amount Input */}
-            <div>
-              <div className="text-xs font-light text-muted-foreground mb-2 uppercase tracking-wider">Amount</div>
-              <div className="relative">
-                <Input
-                  type="number"
-                  placeholder="0.00"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  className="text-3xl font-light h-16 pr-20 border-0 border-b-2 border-border rounded-none bg-transparent focus-visible:ring-0 focus-visible:border-foreground transition-colors"
-                />
+              <div className="space-y-4">
+                {/* Available Balance */}
                 {balance && (
-                  <button
-                    onClick={handleMax}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-sm font-light text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Max
-                  </button>
+                  <div className="p-4 border border-border rounded-3xl bg-card/50">
+                    <div className="text-xs font-light text-muted-foreground mb-2 uppercase tracking-wider">Available Balance</div>
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-8 h-8 rounded-full overflow-hidden">
+                        <Image
+                          src={selectedToken.image}
+                          alt={selectedToken.name}
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                      <div className="text-2xl font-light text-foreground">
+                        {formatNumberWithCommas(
+                          parseFloat(formatUnits(balance.value, balance.decimals)),
+                          2
+                        )} {selectedToken.symbol}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Show Get USDC button if user has no USDC */}
+                {hasNoUSDC && (
+                  <div className="p-4 border border-border rounded-3xl bg-card/50">
+                    <div className="text-xs font-light text-muted-foreground mb-3 uppercase tracking-wider">No USDC Balance</div>
+                    <div className="text-sm font-light text-muted-foreground mb-4">
+                      You need USDC to deposit. Get free testnet USDC from Circle&apos;s faucet.
+                    </div>
+                    <Button
+                      onClick={handleGetUSDC}
+                      variant="outline"
+                      className="w-full h-16 text-base font-light border-2 flex items-center justify-center gap-2"
+                    >
+                      <div className="relative overflow-hidden">
+                        <Image
+                          src={IMAGE_PATHS.chains.baseSepolia}
+                          alt="Base"
+                          width={24}
+                          height={24}
+                        />
+                      </div>
+                      Get USDC on Base Sepolia
+                    </Button>
+                  </div>
+                )}
+
+                {/* Amount Input */}
+                <div>
+                  <div className="text-xs font-light text-muted-foreground mb-2 uppercase tracking-wider">Amount</div>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      placeholder="0.00"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      className="text-3xl font-light h-16 pr-20 border-0 border-b-2 border-border rounded-none bg-transparent focus-visible:ring-0 focus-visible:border-foreground transition-colors"
+                    />
+                    {balance && (
+                      <button
+                        onClick={handleMax}
+                        className="absolute right-0 top-1/2 -translate-y-1/2 text-sm font-light text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Max
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Summary */}
+                {depositAmount && parseFloat(depositAmount) > 0 && (
+                  <div className="space-y-2">
+                    <div className="p-4 border border-border rounded-3xl bg-card/30">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm font-light text-muted-foreground">You will deposit</span>
+                        <span className="text-lg font-light text-foreground">
+                          {formatNumberWithCommas(depositAmount, 2)} {selectedToken.symbol}
+                        </span>
+                      </div>
+                      <div className="h-px bg-border mb-2"></div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-light text-muted-foreground">Estimated shares</span>
+                        <span className="text-lg font-light text-foreground">
+                          {depositAmount
+                            ? `~${formatNumberWithCommas(parseFloat(depositAmount), 4)} APV`
+                            : '0.0000 APV'}
+                        </span>
+                      </div>
+                    </div>
+
+                  </div>
                 )}
               </div>
-            </div>
 
-            {/* Summary */}
-            {depositAmount && parseFloat(depositAmount) > 0 && (
-              <div className="space-y-2">
-                <div className="p-4 border border-border rounded-3xl bg-card/30">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-light text-muted-foreground">You will deposit</span>
-                    <span className="text-lg font-light text-foreground">{depositAmount} {selectedToken.symbol}</span>
-                  </div>
-                  <div className="h-px bg-border mb-2"></div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-light text-muted-foreground">Estimated shares</span>
-                    <span className="text-lg font-light text-foreground">
-                      {depositAmount
-                        ? `~${parseFloat(depositAmount).toFixed(4)} APV`
-                        : '0.0000 APV'}
-                    </span>
-                  </div>
-                </div>
-
-              </div>
-            )}
-          </div>
-
-          <AlertDialogFooter className="gap-0 mt-4">
-            <AlertDialogCancel
-              onClick={() => setDepositAmount('')}
-              className="rounded-full font-light h-12 px-8 text-sm"
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDeposit}
-              disabled={!depositAmount || parseFloat(depositAmount) <= 0 || isLoading || isPending || isConfirming}
-              className="rounded-full font-light h-12 px-8 text-sm"
-            >
-              {needsApproval
-                ? isPending || isConfirming
-                  ? 'Approving...'
-                  : isSuccess
-                    ? 'Approved! Retrying...'
-                    : 'Approve Tokens'
-                : isLoading || isPending || isConfirming
-                  ? 'Processing...'
-                  : isSuccess
-                    ? 'Success!'
-                    : 'Confirm Deposit'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
+              <AlertDialogFooter className="gap-0 mt-4">
+                <AlertDialogCancel
+                  onClick={() => setDepositAmount('')}
+                  className="rounded-full font-light h-12 px-8 text-sm"
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleConfirmDeposit}
+                  disabled={!depositAmount || parseFloat(depositAmount) <= 0 || isLoading || isPending || isConfirming}
+                  className="rounded-full font-light h-12 px-8 text-sm"
+                >
+                  {needsApproval
+                    ? isPending || isConfirming
+                      ? 'Approving...'
+                      : isSuccess
+                        ? 'Approved! Retrying...'
+                        : 'Approve Tokens'
+                    : isLoading || isPending || isConfirming
+                      ? 'Processing...'
+                      : isSuccess
+                        ? 'Success!'
+                        : 'Confirm Deposit'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
         </AlertDialogContent>
       </AlertDialog>
     </div>

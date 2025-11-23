@@ -46,6 +46,7 @@ const Page = () => {
         chainId: currentChain.id,
         query: {
             enabled: !!address && !!MOCK_USDC_ADDRESS,
+            refetchInterval: 5000,
         },
     })
 
