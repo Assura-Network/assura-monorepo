@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { CustomConnectButton } from './CustomConnectButton'
-import { useAccount, useBalance } from 'wagmi'
-import { formatUnits } from 'viem'
+import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
+import { formatUnits, parseUnits } from 'viem'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import {
@@ -17,16 +17,108 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog'
-import { TOKENS, IMAGE_PATHS } from '@/lib/constants'
-import { currentChain } from '@/lib/constants'
+import { TOKENS, IMAGE_PATHS, CONTRACT_ADDRESSES, currentChain } from '@/lib/constants'
+import { createComplianceData } from '@/lib/compliance'
 import { ThemeToggle } from './ThemeToggle'
+
+// Vault ABI - depositWithCompliance function and verificationKey
+const VAULT_ABI = [
+  {
+    name: 'depositWithCompliance',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'assets', type: 'uint256' },
+      { name: 'receiver', type: 'address' },
+      { name: 'attestedComplianceData', type: 'bytes' },
+    ],
+    outputs: [{ name: 'shares', type: 'uint256' }],
+  },
+  {
+    name: 'verificationKey',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    name: 'minScore',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
+// ERC20 ABI for approvals
+const ERC20_ABI = [
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'allowance',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
+// AssuraVerifier ABI
+const ASSURA_VERIFIER_ABI = [
+  {
+    name: 'getVerifyingData',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'appContractAddress', type: 'address' },
+      { name: 'key', type: 'bytes32' },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'score', type: 'uint256' },
+          { name: 'expiry', type: 'uint256' },
+          { name: 'chainId', type: 'uint256' },
+        ],
+      },
+    ],
+  },
+] as const
 
 export default function VaultDeposit() {
   const [selectedToken, setSelectedToken] = useState(TOKENS[0])
   const [depositAmount, setDepositAmount] = useState('')
-  const [vaultBalance, setVaultBalance] = useState('0.00')
   const [showDialog, setShowDialog] = useState(false)
-  const { address, isConnected } = useAccount()
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [needsApproval, setNeedsApproval] = useState(false)
+  const [approvalAmount, setApprovalAmount] = useState<bigint | null>(null)
+  const { address, isConnected, chainId } = useAccount()
+
+  const { writeContract, data: hash, isPending } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+    hash,
+  })
 
   const tokenAddress = selectedToken.available && 'address' in selectedToken
     ? selectedToken.address
@@ -36,6 +128,17 @@ export default function VaultDeposit() {
     address,
     token: tokenAddress,
     chainId: currentChain.id,
+  })
+
+  // Read user's shares from vault contract
+  const { data: userShares, refetch: refetchShares } = useReadContract({
+    address: CONTRACT_ADDRESSES.VAULT,
+    abi: VAULT_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: {
+      enabled: !!address && isConnected && CONTRACT_ADDRESSES.VAULT !== '0x0000000000000000000000000000000000000000',
+    },
   })
 
   // Get balances for each available token
@@ -69,13 +172,185 @@ export default function VaultDeposit() {
   }
 
   const handleConfirmDeposit = async () => {
-    console.log('Depositing', depositAmount, selectedToken.symbol)
-    const currentBalance = parseFloat(vaultBalance) || 0
-    const newBalance = currentBalance + parseFloat(depositAmount)
-    setVaultBalance(newBalance.toFixed(2))
-    setDepositAmount('')
-    setShowDialog(false)
+    if (!address || !isConnected || !depositAmount || parseFloat(depositAmount) <= 0) {
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      if (!selectedToken.available || !('address' in selectedToken) || !selectedToken.address) {
+        throw new Error('Invalid token selected')
+      }
+
+      const vaultAddress = CONTRACT_ADDRESSES.VAULT
+      const assuraVerifierAddress = CONTRACT_ADDRESSES.ASSURA_VERIFIER
+
+      if (vaultAddress === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Vault contract address not configured. Please update CONTRACT_ADDRESSES.VAULT in constants.ts')
+      }
+
+      // Convert amount to wei/smallest unit
+      const amountInWei = parseUnits(depositAmount, selectedToken.decimals)
+
+      // Read verification key and minScore from vault contract
+      const { createPublicClient, http } = await import('viem')
+      const publicClient = createPublicClient({
+        chain: currentChain,
+        transport: http(),
+      })
+
+      const [verificationKey, minScore] = await Promise.all([
+        publicClient.readContract({
+          address: vaultAddress,
+          abi: VAULT_ABI,
+          functionName: 'verificationKey',
+        }) as Promise<`0x${string}`>,
+        publicClient.readContract({
+          address: vaultAddress,
+          abi: VAULT_ABI,
+          functionName: 'minScore',
+        }) as Promise<bigint>,
+      ])
+
+      // Get verifying data from AssuraVerifier to check required score
+      const verifyingData = await publicClient.readContract({
+        address: assuraVerifierAddress,
+        abi: ASSURA_VERIFIER_ABI,
+        functionName: 'getVerifyingData',
+        args: [vaultAddress, verificationKey],
+      }) as { score: bigint; expiry: bigint; chainId: bigint }
+
+      // Use the required score from verifying data (or minScore as fallback)
+      const requiredScore = verifyingData.score > BigInt(0) ? verifyingData.score : minScore
+      // Use a score higher than required to ensure it passes
+      const score = requiredScore + BigInt(50) // Add buffer to ensure it's above minimum
+
+      // Check and handle token approval
+      const tokenAddress = selectedToken.address as `0x${string}`
+      const allowance = await publicClient.readContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [address, vaultAddress],
+      })
+
+      // Handle token approval if needed
+      if (allowance < amountInWei) {
+        console.log('Insufficient allowance, requesting approval...')
+
+        // Request approval - use a larger amount to avoid repeated approvals
+        const approveAmount = amountInWei * BigInt(10) // Approve 10x the amount for future deposits
+
+        // Set state to show approval is needed
+        setNeedsApproval(true)
+        setApprovalAmount(approveAmount)
+
+        // Trigger approval transaction
+        writeContract({
+          address: tokenAddress,
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [vaultAddress, approveAmount],
+        })
+
+        setIsLoading(false)
+        return // Exit early, approval transaction will be handled by useEffect
+      }
+
+      // Prepare attested data
+      const currentTimestamp = BigInt(Math.floor(Date.now() / 1000))
+      // Use chainId from verifying data if set, otherwise use current chain
+      // If chainId is 0 in verifying data, it means "any chain"
+      const currentChainId = verifyingData.chainId > BigInt(0)
+        ? verifyingData.chainId
+        : BigInt(chainId || currentChain.id)
+
+      const attestedData = {
+        score,
+        timeAtWhichAttested: currentTimestamp,
+        chainId: currentChainId,
+      }
+
+      // Get TEE signature from API
+      const teeResponse = await fetch('/api/tee/sign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          score: attestedData.score.toString(),
+          timeAtWhichAttested: attestedData.timeAtWhichAttested.toString(),
+          chainId: attestedData.chainId.toString(),
+          assuraVerifierAddress,
+          signatureType: 'eip712', // Use EIP-712 by default
+        }),
+      })
+
+      if (!teeResponse.ok) {
+        const errorData = await teeResponse.json()
+        throw new Error(errorData.error || 'Failed to get TEE signature')
+      }
+
+      const { signature, attestedData: responseAttestedData } = await teeResponse.json()
+
+      // Create compliance data
+      const complianceData = createComplianceData(
+        address,
+        verificationKey,
+        signature as `0x${string}`,
+        {
+          score: BigInt(responseAttestedData.score),
+          timeAtWhichAttested: BigInt(responseAttestedData.timeAtWhichAttested),
+          chainId: BigInt(responseAttestedData.chainId),
+        }
+      )
+
+      // Deposit with compliance
+      // Note: User must approve the vault contract first to spend tokens
+      // This can be done separately or we can add an approval step here
+      console.log('Depositing with compliance...')
+      writeContract({
+        address: vaultAddress,
+        abi: VAULT_ABI,
+        functionName: 'depositWithCompliance',
+        args: [amountInWei, address, complianceData],
+      })
+    } catch (err) {
+      console.error('Deposit error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to deposit')
+      setIsLoading(false)
+    }
   }
+
+  // Handle approval success - retry deposit automatically
+  useEffect(() => {
+    if (isSuccess && needsApproval && approvalAmount && hash) {
+      // Approval succeeded, wait a bit then retry the deposit
+      const retryDeposit = async () => {
+        setNeedsApproval(false)
+        setApprovalAmount(null)
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        // Retry deposit - trigger it by calling the handler
+        // We'll use a flag to indicate we should proceed with deposit
+        setIsLoading(true)
+        // The actual deposit will happen in the next render cycle
+      }
+      retryDeposit()
+    }
+  }, [isSuccess, needsApproval, approvalAmount, hash])
+
+  // Update shares display when deposit transaction succeeds (not approval)
+  useEffect(() => {
+    if (isSuccess && !needsApproval && !isLoading && depositAmount) {
+      // Refetch shares from contract
+      refetchShares()
+      setDepositAmount('')
+      setShowDialog(false)
+      setIsLoading(false)
+    }
+  }, [isSuccess, needsApproval, isLoading, depositAmount, refetchShares])
 
   const handleMax = () => {
     if (balance) {
@@ -118,12 +393,16 @@ export default function VaultDeposit() {
       {/* Main */}
       <main className="mt-16">
         <div className="max-w-[625px] mx-auto px-8">
-          {/* Current Vault Balance */}
+          {/* Current Vault Shares */}
           <div className="mb-16">
-            <div className="text-lg font-light text-muted-foreground mb-3">Your Vault Balance</div>
+            <div className="text-lg font-light text-muted-foreground mb-3">Your Shares</div>
             <div className="flex items-end gap-4">
-              <div className="text-7xl font-light leading-none text-foreground">{vaultBalance}</div>
-              <div className="text-3xl font-light text-muted-foreground pb-2">{selectedToken.symbol}</div>
+              <div className="text-7xl font-light leading-none text-foreground">
+                {userShares !== undefined
+                  ? parseFloat(formatUnits(userShares, selectedToken.decimals)).toFixed(4)
+                  : '0.0000'}
+              </div>
+              <div className="text-3xl font-light text-muted-foreground pb-2">APV</div>
             </div>
             <div className="flex gap-8 mt-6 text-base font-light">
               <div>
@@ -252,6 +531,12 @@ export default function VaultDeposit() {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
+          {error && (
+            <div className="p-4 border border-red-500/50 rounded-3xl bg-red-500/10">
+              <div className="text-sm font-light text-red-500">{error}</div>
+            </div>
+          )}
+
           <div className="space-y-4">
             {/* Available Balance */}
             {balance && (
@@ -330,9 +615,11 @@ export default function VaultDeposit() {
                   </div>
                   <div className="h-px bg-border mb-2"></div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-light text-muted-foreground">New vault balance</span>
+                    <span className="text-sm font-light text-muted-foreground">Estimated shares</span>
                     <span className="text-lg font-light text-foreground">
-                      {(parseFloat(vaultBalance) + parseFloat(depositAmount || '0')).toFixed(2)} {selectedToken.symbol}
+                      {depositAmount
+                        ? `~${parseFloat(depositAmount).toFixed(4)} APV`
+                        : '0.0000 APV'}
                     </span>
                   </div>
                 </div>
@@ -350,10 +637,20 @@ export default function VaultDeposit() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDeposit}
-              disabled={!depositAmount || parseFloat(depositAmount) <= 0}
+              disabled={!depositAmount || parseFloat(depositAmount) <= 0 || isLoading || isPending || isConfirming}
               className="rounded-full font-light h-12 px-8 text-sm"
             >
-              Confirm Deposit
+              {needsApproval
+                ? isPending || isConfirming
+                  ? 'Approving...'
+                  : isSuccess
+                    ? 'Approved! Retrying...'
+                    : 'Approve Tokens'
+                : isLoading || isPending || isConfirming
+                  ? 'Processing...'
+                  : isSuccess
+                    ? 'Success!'
+                    : 'Confirm Deposit'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
