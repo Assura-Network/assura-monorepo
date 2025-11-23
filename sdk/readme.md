@@ -66,7 +66,7 @@ console.log("Signature:", attestation.signature);
 import {
   createComplianceData,
   encodeComplianceData,
-} from "@assura-network/sdk";
+} from "assura-sdk";
 import { getFunctionSelector } from "viem";
 
 // Create compliance data
@@ -89,7 +89,7 @@ const encoded = encodeComplianceData(complianceData);
 ### 3. Interact with AssuraVerifier Contract
 
 ```typescript
-import { AssuraVerifierClient } from "@assura-network/sdk";
+import { AssuraVerifierClient } from "assura-sdk";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
@@ -145,7 +145,7 @@ import {
   AssuraVerifierClient,
   createComplianceData,
   encodeComplianceData,
-} from "@assura-network/sdk";
+} from "assura-sdk";
 import { createPublicClient, createWalletClient, http, getFunctionSelector } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
