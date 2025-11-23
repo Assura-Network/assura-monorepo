@@ -6,9 +6,11 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "get-address": "tsx src/scripts/get-address.ts"
   },
   "dependencies": {
+    "@oasisprotocol/rofl-client": "^0.1.2",
     "@thenamespace/offchain-manager": "^1.0.9",
     "dotenv": "^17.2.3",
     "express": "^4.18.2",

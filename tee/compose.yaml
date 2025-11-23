@@ -7,12 +7,16 @@ services:
       - "3000:3000" # Expose port 3000 for proxy access
     volumes:
       - /run/rofl-appd.sock:/run/rofl-appd.sock
+      - tee-storage:/data/tee  # Persistent storage for user attestations
     environment:
       - PORT=3000
       - NODE_ENV=production
       - NAMESPACE_API_KEY=ns-e6d52ff6-4995-4bd7-b7b8-7ed7596c2a6e
       - TEE_PRIVATE_KEY=0x7cf73cff18de223ccfc1188c034f639768a90fd628393d0538fdb54d62b64695
       - NAMESPACE_NETWORK=mainnet
+      - KEY_ID=evm:base:sepolia
+      - RPC_URL=https://sepolia.base.org
+      - CHAIN_ID=84532
     annotations:
       # Proxy configuration - Custom domain support
       # DNS Setup Required:
@@ -20,3 +24,7 @@ services:
       # 2. Create TXT record for domain verification (check deployment output)
       net.oasis.proxy.ports.3000.mode: terminate-tls
       net.oasis.proxy.ports.3000.custom_domain: tee.assura.network
+
+volumes:
+  tee-storage:
+    driver: local
