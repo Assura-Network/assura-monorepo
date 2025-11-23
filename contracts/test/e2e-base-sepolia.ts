@@ -398,29 +398,41 @@ describe("E2E Test on Base Sepolia", async function () {
 
     // Get initial counter value
     const initialValue = await counterContract.read.x();
+    console.log(`Initial counter value: ${initialValue}`);
 
     // Call inc() with compliance data
     console.log(`Calling inc() from ${userAccount.address}...`);
-    const hash = await counterContract.write.inc([complianceData], {
-      account: userAccount,
-    });
-
-    // Wait for transaction and verify it succeeded
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    console.log(`✓ Transaction confirmed: ${receipt.transactionHash}`);
     
-    if (receipt.status === 'reverted') {
-      throw new Error(`Transaction reverted: ${receipt.transactionHash}`);
+    try {
+      const hash = await counterContract.write.inc([complianceData], {
+        account: userAccount,
+      });
+
+      // Wait for transaction and verify it succeeded
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      console.log(`✓ Transaction confirmed: ${receipt.transactionHash}`);
+      console.log(`Transaction status: ${receipt.status}`);
+      
+      if (receipt.status === 'reverted') {
+        throw new Error(`Transaction reverted: ${receipt.transactionHash}`);
+      }
+
+      // Wait a moment for state to update
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Verify counter was incremented
+      const newValue = await counterContract.read.x();
+      console.log(`Final counter value: ${newValue}`);
+      assert.equal(newValue, initialValue + 1n, `Counter should be incremented from ${initialValue} to ${initialValue + 1n}, but got ${newValue}`);
+
+      console.log(`✓ Counter value: ${initialValue} -> ${newValue}`);
+    } catch (error: any) {
+      console.error(`Transaction failed:`, error.message);
+      if (error.message && error.message.includes('revert')) {
+        console.error(`Revert reason: ${error.message}`);
+      }
+      throw error;
     }
-
-    // Wait a moment for state to update
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // Verify counter was incremented
-    const newValue = await counterContract.read.x();
-    assert.equal(newValue, initialValue + 1n, `Counter should be incremented from ${initialValue} to ${initialValue + 1n}, but got ${newValue}`);
-
-    console.log(`✓ Counter value: ${initialValue} -> ${newValue}`);
   });
 
   it("Should successfully call incBy() with valid EIP-712 compliance data", async function () {
@@ -460,27 +472,41 @@ describe("E2E Test on Base Sepolia", async function () {
     // Call incBy() with compliance data
     console.log(`Calling incBy(${incrementBy}) from ${userAccount.address}...`);
     console.log(`Initial value: ${initialValue}, Expected after: ${expectedValue}`);
-    const hash = await counterContract.write.incBy([incrementBy, complianceData], {
-      account: userAccount,
-    });
+    
+    try {
+      const hash = await counterContract.write.incBy([incrementBy, complianceData], {
+        account: userAccount,
+      });
 
-    // Wait for transaction
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    console.log(`✓ Transaction confirmed: ${receipt.transactionHash}`);
+      // Wait for transaction and verify it succeeded
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      console.log(`✓ Transaction confirmed: ${receipt.transactionHash}`);
+      console.log(`Transaction status: ${receipt.status}`);
+      
+      if (receipt.status === 'reverted') {
+        throw new Error(`Transaction reverted: ${receipt.transactionHash}`);
+      }
 
-    // Wait a moment for state to update
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Wait a moment for state to update
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // Verify counter was incremented
-    const newValue = await counterContract.read.x();
-    console.log(`Final value: ${newValue}`);
-    assert.equal(
-      newValue,
-      expectedValue,
-      `Counter should be incremented by ${incrementBy} from ${initialValue} to ${expectedValue}`
-    );
+      // Verify counter was incremented
+      const newValue = await counterContract.read.x();
+      console.log(`Final value: ${newValue}`);
+      assert.equal(
+        newValue,
+        expectedValue,
+        `Counter should be incremented by ${incrementBy} from ${initialValue} to ${expectedValue}, but got ${newValue}`
+      );
 
-    console.log(`✓ Counter value: ${initialValue} -> ${newValue}`);
+      console.log(`✓ Counter value: ${initialValue} -> ${newValue}`);
+    } catch (error: any) {
+      console.error(`Transaction failed:`, error.message);
+      if (error.message && error.message.includes('revert')) {
+        console.error(`Revert reason: ${error.message}`);
+      }
+      throw error;
+    }
   });
 
   it("Should successfully call inc() with valid EIP-191 compliance data", async function () {
@@ -516,12 +542,22 @@ describe("E2E Test on Base Sepolia", async function () {
     const initialValue = await counterContract.read.x();
     console.log(`Initial counter value: ${initialValue}`);
 
+    // Wait a bit to ensure previous transactions are processed (avoid nonce conflicts)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     // Call inc() with compliance data
     console.log(`Calling inc() from ${userAccount.address}...`);
     
     try {
+      // Get current nonce to avoid conflicts
+      const nonce = await publicClient.getTransactionCount({
+        address: userAccount.address,
+      });
+      console.log(`Using nonce: ${nonce}`);
+      
       const hash = await counterContract.write.inc([complianceData], {
         account: userAccount,
+        nonce: nonce,
       });
 
       // Wait for transaction and verify it succeeded

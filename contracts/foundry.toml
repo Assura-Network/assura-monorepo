@@ -1,7 +1,7 @@
 [profile.default]
 src = "contracts"
 out = "artifacts/foundry"
-libs = ["node_modules"]
+libs = ["node_modules", "lib"]
 remappings = [
     "bcnmy-nexus/=node_modules/bcnmy-nexus/",
     "solady/=node_modules/solady/src/",
