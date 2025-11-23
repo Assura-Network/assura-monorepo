@@ -12,6 +12,7 @@ import { MenuIcon, XIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Button } from '../ui/button';
 import { ThemeToggle } from '../ThemeToggle';
+import Link from 'next/link';
 
 export default function Header() {
     const header = useRef<HTMLDivElement>(null);
@@ -42,31 +43,32 @@ export default function Header() {
         <>
             <div ref={header} className="absolute flex z-[1] top-0 text-foreground p-[35px] justify-between w-full font-light box-border items-center">
                 <div className="flex cursor-pointer items-center gap-3 group">
-                    <div className="relative w-12 h-12 transition-transform duration-500 [transition-timing-function:cubic-bezier(0.76,0,0.24,1)] group-hover:rotate-360">
+                    <div className="relative w-12 h-12 shrink-0 transition-transform duration-500 ease-[cubic-bezier(0.76,0,0.24,1)] group-hover:rotate-360">
                         <Image
                             src="/images/Assura-Light.svg"
                             alt="Assura"
                             width={45}
                             height={45}
-                            className="dark:hidden"
+                            className="absolute inset-0 m-auto dark:hidden"
                         />
                         <Image
                             src="/images/Assura-Dark.svg"
                             alt="Assura"
                             width={45}
                             height={45}
-                            className="hidden dark:block"
+                            className="absolute inset-0 m-auto hidden dark:block"
                         />
                     </div>
                     <span className="text-2xl font-medium -ml-5">Assura</span>
                 </div>
                 <div className="flex items-center gap-4">
+                    <Link href="https://app.assura.network">
                     <Button
                         variant="outline"
                         className="rounded-full cursor-pointer py-6 px-6 bg-foreground text-background hover:bg-foreground/90 hover:text-background border-none shadow-none dark:bg-foreground dark:text-background dark:hover:bg-foreground/90 dark:hover:text-background"
                     >
                         Launch app
-                    </Button>
+                    </Button></Link>
                     <ThemeToggle />
                 </div>
             </div>
