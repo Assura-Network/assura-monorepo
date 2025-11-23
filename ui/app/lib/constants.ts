@@ -3,7 +3,7 @@ import { baseSepolia } from "viem/chains";
 export const currentChain = baseSepolia;
 
 // TEE Service URL - can be overridden via NEXT_PUBLIC_TEE_SERVICE_URL environment variable
-export const TEE_SERVICE_URL = 'https://tee.assura.network';
+export const TEE_SERVICE_URL = "https://tee.assura.network";
 
 // Contract addresses (update these with your deployed contract addresses)
 export const CONTRACT_ADDRESSES = {
