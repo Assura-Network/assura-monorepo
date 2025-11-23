@@ -1028,8 +1028,8 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
     );
     
     // Skip test if score is already sufficient
-    if (BigInt(attestation2.attestedData.score) >= 100n) {
-      console.log(`⚠ Skipping second bypass expiry test - TEE score (${attestation2.attestedData.score}) is already sufficient`);
+    if (BigInt(attestation2.attestedData.score) >= 5n) {
+      console.log(`⚠ Skipping second bypass expiry test - TEE score (${attestation2.attestedData.score}) is already sufficient (required: 5)`);
       this.skip();
       return;
     }
@@ -1083,10 +1083,10 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
       console.log(`  Note: Expiry ${bypassEntry2.expiry} is in the past (current: ${currentTimestamp2}), but entry exists - OK`);
     }
 
-    const expiryDiff2 = bypassEntry2.expiry > currentTimestamp2 
-      ? bypassEntry2.expiry - currentTimestamp2 
+    const expiryDiff2 = bypassEntry2.expiry > currentTimestamp2
+      ? bypassEntry2.expiry - currentTimestamp2
       : currentTimestamp2 - bypassEntry2.expiry;
-    console.log(`✓ Score 30: Expiry = ${bypassEntry2.expiry} (diff from current: ${expiryDiff2} seconds)`);
+    console.log(`✓ Second bypass: Expiry = ${bypassEntry2.expiry} (diff from current: ${expiryDiff2} seconds, score: ${attestedData2.score})`);
   });
 
   it("Should allow access after bypass expiry", async function (this: { skip: () => void }) {
@@ -1108,8 +1108,8 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
     };
     
     // Skip test if score is already sufficient
-    if (attestedData.score >= 100n) {
-      console.log(`⚠ Skipping bypass expiry access test - TEE score (${attestedData.score}) is already sufficient`);
+    if (attestedData.score >= 5n) {
+      console.log(`⚠ Skipping bypass expiry access test - TEE score (${attestedData.score}) is already sufficient (required: 5)`);
       this.skip();
       return;
     }
@@ -1146,12 +1146,13 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
     // Get current block timestamp to verify expiry is reasonable
     const currentBlock3 = await publicClient.getBlock({ blockTag: "latest" });
     const currentTimestamp3 = BigInt(currentBlock3.timestamp);
-    
+
     // The expiry should be calculated from when the transaction was executed
-    // Score difference: 100 - 50 = 50, so expiry should be approximately execution block + 500 seconds
+    // Required score = 5, actual score < 5
+    // Score difference: 5 - actualScore (e.g., 5 - 0 = 5, so expiry ≈ execution block + 50 seconds)
     // Since we can't get exact execution block, verify expiry is reasonable
-    const expiryDiff3 = bypassEntry.expiry > currentTimestamp3 
-      ? bypassEntry.expiry - currentTimestamp3 
+    const expiryDiff3 = bypassEntry.expiry > currentTimestamp3
+      ? bypassEntry.expiry - currentTimestamp3
       : currentTimestamp3 - bypassEntry.expiry;
     
     // Happy path: Just verify expiry is set (lenient check - user said marginal errors OK)
