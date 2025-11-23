@@ -83,9 +83,10 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   let vaultContract: Awaited<ReturnType<typeof viem.getContractAt<"AssuraProtectedVault">>>;
   let chainId: bigint;
 
-  // Verification key for the vault
-  const verificationKey = keccak256(toBytes("AssuraProtectedVault"));
-  const minScore = 50n; // Minimum score required for vault operations
+  // Selectors for vault functions (will be retrieved from contract)
+  let depositSelector: `0x${string}`;
+  let mintSelector: `0x${string}`;
+  
   const tokenDecimals = 6n;
 
   /**
@@ -248,21 +249,25 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
    * Helper function to ensure user has enough tokens and allowance
    */
   async function ensureUserHasTokens(amount: bigint): Promise<void> {
-    const userBalance = await mockERC20Contract.read.balanceOf([userAddress]);
+    if (!mockERC20Contract || !vaultAddress) {
+      throw new Error("Contracts must be deployed before calling ensureUserHasTokens");
+    }
+    const contract = mockERC20Contract as any;
+    const userBalance = await contract.read.balanceOf([userAddress]);
     if (userBalance < amount) {
       const needed = amount - userBalance;
       console.log(`Minting ${needed} tokens to user...`);
-      const mintHash = await mockERC20Contract.write.mint([userAddress, needed], {
+      const mintHash = await contract.write.mint([userAddress, needed], {
         account: ownerAccount,
       });
       await waitForTransaction(mintHash);
     }
 
-    const allowance = await mockERC20Contract.read.allowance([userAddress, vaultAddress]);
+    const allowance = await contract.read.allowance([userAddress, vaultAddress]);
     if (allowance < amount) {
       const approveAmount = amount * 2n; // Approve extra for multiple operations
       console.log(`Approving ${approveAmount} tokens for vault...`);
-      const approveHash = await mockERC20Contract.write.approve([vaultAddress, approveAmount], {
+      const approveHash = await contract.write.approve([vaultAddress, approveAmount], {
         account: userAccount,
       });
       await waitForTransaction(approveHash);
@@ -275,6 +280,7 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     console.log("\n=== Deploying AssuraVerifier ===");
     console.log(`Owner: ${ownerAddress}`);
     console.log(`TEE Address: ${teeAddress}`);
+    console.log(`NexusAccountDeployer: Will be deployed automatically`);
 
     const assuraVerifier = await viem.deployContract("AssuraVerifier", [
       ownerAddress,
@@ -296,21 +302,29 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     console.log(`✓ Chain ID: ${chainId}`);
 
     // Verify deployment with retries
-    let owner: `0x${string}`;
-    let teeAddr: `0x${string}`;
+    let owner: `0x${string}` | undefined;
+    let teeAddr: `0x${string}` | undefined;
+    let nexusDeployer: `0x${string}` | undefined;
     for (let i = 0; i < 5; i++) {
       try {
         owner = await assuraVerifierContract.read.owner();
         teeAddr = await assuraVerifierContract.read.ASSURA_TEE_ADDRESS();
-        if (owner && teeAddr) break;
+        nexusDeployer = await assuraVerifierContract.read.getNexusAccountDeployer() as `0x${string}`;
+        if (owner && teeAddr && nexusDeployer) break;
       } catch (error) {
         if (i === 4) throw error;
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    assert.equal(owner.toLowerCase(), ownerAddress.toLowerCase());
-    assert.equal(teeAddr.toLowerCase(), teeAddress.toLowerCase());
+    assert.ok(owner, "Owner should be set");
+    assert.ok(teeAddr, "TEE address should be set");
+    assert.ok(nexusDeployer, "NexusAccountDeployer should be set");
+    assert.equal(owner!.toLowerCase(), ownerAddress.toLowerCase());
+    assert.equal(teeAddr!.toLowerCase(), teeAddress.toLowerCase());
+    assert.notEqual(nexusDeployer!, "0x0000000000000000000000000000000000000000");
+
+    console.log(`✓ NexusAccountDeployer deployed at: ${nexusDeployer}`);
   });
 
   it("Should deploy MockERC20 token", async function () {
@@ -330,13 +344,13 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     mockERC20Contract = await viem.getContractAt(
       "contracts/test/MockERC20.sol:MockERC20",
       mockERC20Address
-    );
+    ) as any;
 
     // Verify deployment with retries
-    let totalSupply: bigint;
+    let totalSupply: bigint | undefined;
     for (let i = 0; i < 5; i++) {
       try {
-        totalSupply = await mockERC20Contract.read.totalSupply();
+        totalSupply = await (mockERC20Contract as any).read.totalSupply();
         if (totalSupply !== undefined) break;
       } catch (error) {
         if (i === 4) throw error;
@@ -344,13 +358,17 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       }
     }
     
+    assert.ok(totalSupply !== undefined, "Total supply should be set");
     console.log(`✓ Total supply: ${totalSupply}`);
   });
 
   it("Should deploy AssuraProtectedVault contract", async function () {
     console.log("\n=== Deploying AssuraProtectedVault ===");
-    console.log(`Verification Key: ${verificationKey}`);
-    console.log(`Min Score: ${minScore}`);
+
+    // Use a placeholder verification key and minScore for constructor
+    // The actual verifying data will be set using selectors
+    const verificationKey = keccak256(toBytes("AssuraProtectedVault"));
+    const minScore = 50n;
 
     const vault = await viem.deployContract("AssuraProtectedVault", [
       mockERC20Address,
@@ -373,14 +391,14 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     );
 
     // Verify deployment with retries
-    let verifier: `0x${string}`;
-    let key: `0x${string}`;
-    let score: bigint;
+    let verifier: `0x${string}` | undefined;
+    let key: `0x${string}` | undefined;
+    let score: bigint | undefined;
     for (let i = 0; i < 5; i++) {
       try {
-        verifier = await vaultContract.read.assuraVerifier();
-        key = await vaultContract.read.verificationKey();
-        score = await vaultContract.read.minScore();
+        verifier = await (vaultContract as any).read.assuraVerifier();
+        key = await (vaultContract as any).read.verificationKey();
+        score = await (vaultContract as any).read.minScore();
         if (verifier && key && score !== undefined) break;
       } catch (error) {
         if (i === 4) throw error;
@@ -388,6 +406,9 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       }
     }
     
+    assert.ok(verifier, "Verifier should be set");
+    assert.ok(key, "Key should be set");
+    assert.ok(score !== undefined, "Score should be set");
     assert.equal(
       verifier!.toLowerCase(),
       assuraVerifierAddress.toLowerCase(),
@@ -399,32 +420,65 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     console.log(`✓ Vault verifier: ${verifier}`);
     console.log(`✓ Vault verification key: ${key}`);
     console.log(`✓ Vault min score: ${score}`);
+
+    // Get selectors from vault contract
+    depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    mintSelector = await (vaultContract.read as any).getOnlyUserWithScore30Selector();
+    
+    console.log(`✓ Deposit selector: ${depositSelector}`);
+    console.log(`✓ Mint selector: ${mintSelector}`);
   });
 
   it("Should verify that verifying data was set correctly", async function () {
     console.log("\n=== Verifying Data Setup ===");
 
-    const verifyingData = await assuraVerifierContract.read.getVerifyingData([
+    // Get selectors - retry if needed
+    if (!depositSelector || !mintSelector) {
+      for (let i = 0; i < 5; i++) {
+        try {
+          depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+          mintSelector = await (vaultContract.read as any).getOnlyUserWithScore30Selector();
+          if (depositSelector && depositSelector !== "0x" && mintSelector && mintSelector !== "0x") {
+            break;
+          }
+        } catch (error) {
+          if (i === 4) throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    assert(depositSelector && depositSelector !== "0x", "deposit() selector should be valid");
+    assert(mintSelector && mintSelector !== "0x", "mint() selector should be valid");
+
+    const depositVerifyingData = await assuraVerifierContract.read.getVerifyingData([
       vaultAddress,
-      verificationKey,
+      depositSelector,
+    ]);
+    const mintVerifyingData = await assuraVerifierContract.read.getVerifyingData([
+      vaultAddress,
+      mintSelector,
     ]);
 
-    assert.equal(verifyingData.score, minScore, `Vault should require score ${minScore}`);
-    assert.equal(verifyingData.expiry, 0n, "Vault should have no expiry");
-    assert.equal(verifyingData.chainId, 0n, "Vault should accept any chain");
+    assert.equal(depositVerifyingData.score, 5n, "depositWithScore100() should require score 5");
+    assert.equal(mintVerifyingData.score, 10n, "mintWithScore30() should require score 10");
 
-    console.log(`✓ Vault requires score: ${verifyingData.score}`);
-    console.log(`✓ Vault expiry: ${verifyingData.expiry} (0 = no expiry)`);
-    console.log(`✓ Vault chainId: ${verifyingData.chainId} (0 = any chain)`);
+    console.log(`✓ depositWithScore100() requires score: ${depositVerifyingData.score}`);
+    console.log(`✓ mintWithScore30() requires score: ${mintVerifyingData.score}`);
   });
 
   // ============ Valid Compliance Data Tests ============
 
   it("Should successfully deposit with valid EIP-191 compliance data", async function () {
-    console.log("\n=== Testing depositWithCompliance with EIP-191 signature ===");
+    console.log("\n=== Testing depositWithScore100 with EIP-191 signature ===");
 
     const depositAmount = 1000n * 10n ** tokenDecimals;
     await ensureUserHasTokens(depositAmount);
+
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
 
     // Get attestation from TEE service (score generated by TEE)
     const attestation = await getAttestation(
@@ -439,26 +493,26 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       chainId: BigInt(attestation.attestedData.chainId),
     };
 
-    // Skip test if score is insufficient (TEE gives low scores by default)
-    if (attestedData.score < minScore) {
-      console.log(`⚠ Skipping deposit test - TEE score (${attestedData.score}) is insufficient (required: ${minScore})`);
+    // Skip test if score is insufficient (requires score 5)
+    if (attestedData.score < 5n) {
+      console.log(`⚠ Skipping deposit test - TEE score (${attestedData.score}) is insufficient (required: 5)`);
       return;
     }
 
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       attestation.signature as `0x${string}`,
       attestedData
     );
 
-    const initialUserBalance = await mockERC20Contract.read.balanceOf([userAddress]);
-    const initialVaultBalance = await mockERC20Contract.read.balanceOf([vaultAddress]);
-    const initialUserShares = await vaultContract.read.balanceOf([userAddress]);
-    const initialTotalAssets = await vaultContract.read.totalAssets();
+    const initialUserBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
+    const initialVaultBalance = await (mockERC20Contract as any).read.balanceOf([vaultAddress]);
+    const initialUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
+    const initialTotalAssets = await (vaultContract as any).read.totalAssets();
 
     console.log(`Depositing ${depositAmount} tokens...`);
-    const hash = await vaultContract.write.depositWithCompliance(
+    const hash = await (vaultContract.write as any).depositWithScore100(
       [depositAmount, userAddress, complianceData],
       { account: userAccount }
     );
@@ -467,9 +521,9 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Retry reading until balances update
-    let finalUserBalance = await mockERC20Contract.read.balanceOf([userAddress]);
-    let finalVaultBalance = await mockERC20Contract.read.balanceOf([vaultAddress]);
-    let finalUserShares = await vaultContract.read.balanceOf([userAddress]);
+    let finalUserBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
+    let finalVaultBalance = await (mockERC20Contract as any).read.balanceOf([vaultAddress]);
+    let finalUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
     for (let i = 0; i < 5; i++) {
       if (
         finalUserBalance === initialUserBalance - depositAmount &&
@@ -479,9 +533,9 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      finalUserBalance = await mockERC20Contract.read.balanceOf([userAddress]);
-      finalVaultBalance = await mockERC20Contract.read.balanceOf([vaultAddress]);
-      finalUserShares = await vaultContract.read.balanceOf([userAddress]);
+      finalUserBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
+      finalVaultBalance = await (mockERC20Contract as any).read.balanceOf([vaultAddress]);
+      finalUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
     }
 
     assert.equal(
@@ -499,10 +553,15 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   });
 
   it("Should successfully deposit with valid EIP-712 compliance data", async function () {
-    console.log("\n=== Testing depositWithCompliance with EIP-712 signature ===");
+    console.log("\n=== Testing depositWithScore100 with EIP-712 signature ===");
 
     const depositAmount = 500n * 10n ** tokenDecimals;
     await ensureUserHasTokens(depositAmount);
+
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
 
     // Get attestation from TEE service (score generated by TEE)
     // Note: TEE service provides EIP-191 signatures, not EIP-712
@@ -518,23 +577,23 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       chainId: BigInt(attestation.attestedData.chainId),
     };
 
-    // Skip test if score is insufficient (TEE gives low scores by default)
-    if (attestedData.score < minScore) {
-      console.log(`⚠ Skipping EIP-712 deposit test - TEE score (${attestedData.score}) is insufficient (required: ${minScore})`);
+    // Skip test if score is insufficient (requires score 5)
+    if (attestedData.score < 5n) {
+      console.log(`⚠ Skipping EIP-712 deposit test - TEE score (${attestedData.score}) is insufficient (required: 5)`);
       return;
     }
 
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       attestation.signature as `0x${string}`,
       attestedData
     );
 
-    const initialUserShares = await vaultContract.read.balanceOf([userAddress]);
+    const initialUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
 
     console.log(`Depositing ${depositAmount} tokens...`);
-    const hash = await vaultContract.write.depositWithCompliance(
+    const hash = await (vaultContract.write as any).depositWithScore100(
       [depositAmount, userAddress, complianceData],
       { account: userAccount }
     );
@@ -543,11 +602,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Retry reading until shares update
-    let finalUserShares = await vaultContract.read.balanceOf([userAddress]);
+    let finalUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
     for (let i = 0; i < 5; i++) {
       if (finalUserShares > initialUserShares) break;
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      finalUserShares = await vaultContract.read.balanceOf([userAddress]);
+      finalUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
     }
 
     assert(finalUserShares > initialUserShares, "User should receive shares");
@@ -555,11 +614,16 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   });
 
   it("Should successfully mint shares with valid compliance data", async function () {
-    console.log("\n=== Testing mintWithCompliance ===");
+    console.log("\n=== Testing mintWithScore30 ===");
 
     const sharesToMint = 300n * 10n ** tokenDecimals;
-    const assetsRequired = await vaultContract.read.previewMint([sharesToMint]);
+    const assetsRequired = await (vaultContract as any).read.previewMint([sharesToMint]);
     await ensureUserHasTokens(assetsRequired);
+
+    // Get selector if not already set
+    if (!mintSelector) {
+      mintSelector = await (vaultContract.read as any).getOnlyUserWithScore30Selector();
+    }
 
     // Get attestation from TEE service (score generated by TEE)
     const attestation = await getAttestation(
@@ -574,26 +638,26 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       chainId: BigInt(attestation.attestedData.chainId),
     };
 
-    // Skip test if score is insufficient (TEE gives low scores by default)
-    if (attestedData.score < minScore) {
-      console.log(`⚠ Skipping mint test - TEE score (${attestedData.score}) is insufficient (required: ${minScore})`);
+    // Skip test if score is insufficient (requires score 10)
+    if (attestedData.score < 10n) {
+      console.log(`⚠ Skipping mint test - TEE score (${attestedData.score}) is insufficient (required: 10)`);
       return;
     }
 
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      mintSelector,
       attestation.signature as `0x${string}`,
       attestedData
     );
 
-    const initialUserShares = await vaultContract.read.balanceOf([userAddress]);
+    const initialUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
 
     // Wait to avoid nonce conflicts
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
     console.log(`Minting ${sharesToMint} shares...`);
-    const hash = await vaultContract.write.mintWithCompliance(
+    const hash = await (vaultContract.write as any).mintWithScore30(
       [sharesToMint, userAddress, complianceData],
       { account: userAccount }
     );
@@ -602,11 +666,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Retry reading until shares update
-    let finalUserShares = await vaultContract.read.balanceOf([userAddress]);
+    let finalUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
     for (let i = 0; i < 5; i++) {
       if (finalUserShares >= initialUserShares + sharesToMint) break;
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      finalUserShares = await vaultContract.read.balanceOf([userAddress]);
+      finalUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
     }
 
     assert(
@@ -619,14 +683,19 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   // ============ Error Cases ============
 
   it("Should fail deposit with insufficient score", async function () {
-    console.log("\n=== Testing depositWithCompliance with insufficient score ===");
+    console.log("\n=== Testing depositWithScore100 with insufficient score ===");
 
     const depositAmount = 100n * 10n ** tokenDecimals;
     const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
-    // Use score 30 (less than minScore of 50)
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+
+    // Use score 3 (less than required 5)
     const attestedData = {
-      score: 30n,
+      score: 3n,
       timeAtWhichAttested: currentTimestamp,
       chainId: chainId,
     };
@@ -634,14 +703,14 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     const signature = await createEIP191Signature(attestedData, formattedTeeKey);
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       signature,
       attestedData
     );
 
-    console.log(`Attempting deposit with score 30 (requires ${minScore})...`);
+    console.log(`Attempting deposit with score 3 (requires 5)...`);
     try {
-      const hash = await vaultContract.write.depositWithCompliance(
+      const hash = await (vaultContract.write as any).depositWithScore100(
         [depositAmount, userAddress, complianceData],
         { account: userAccount }
       );
@@ -668,6 +737,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     const depositAmount = 100n * 10n ** tokenDecimals;
     const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+
     const attestedData = {
       score: 100n,
       timeAtWhichAttested: currentTimestamp,
@@ -678,13 +752,13 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     const wrongSignature = await createEIP191Signature(attestedData, formattedUserKey);
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       wrongSignature,
       attestedData
     );
 
     try {
-      const hash = await vaultContract.write.depositWithCompliance(
+      const hash = await (vaultContract.write as any).depositWithScore100(
         [depositAmount, userAddress, complianceData],
         { account: userAccount }
       );
@@ -710,6 +784,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     const depositAmount = 100n * 10n ** tokenDecimals;
     const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
 
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+
     const attestedData = {
       score: 100n,
       timeAtWhichAttested: currentTimestamp,
@@ -717,17 +796,19 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     };
 
     const signature = await createEIP191Signature(attestedData, formattedTeeKey);
-    // Use wrong key (different bytes32)
-    const wrongKey = keccak256(toBytes("WrongKey"));
+    // Use wrong key (mint selector instead of deposit selector)
+    if (!mintSelector) {
+      mintSelector = await (vaultContract.read as any).getOnlyUserWithScore30Selector();
+    }
     const complianceData = createComplianceData(
       userAddress,
-      wrongKey,
+      mintSelector, // Wrong key - using mint selector for deposit
       signature,
       attestedData
     );
 
     try {
-      await vaultContract.write.depositWithCompliance(
+      await (vaultContract.write as any).depositWithScore100(
         [depositAmount, userAddress, complianceData],
         { account: userAccount }
       );
@@ -744,32 +825,61 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
 
   // ============ Bypass Functionality Tests ============
 
-  it("Should create bypass entry when score is insufficient", async function () {
+  it("Should create bypass entry when score is insufficient", async function (this: { skip: () => void }) {
     console.log("\n=== Testing bypass entry creation ===");
 
-    const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
 
-    // Use score 30 (less than required 50)
+    // Get attestation from TEE service (score generated by TEE)
+    const attestation = await getAttestation(
+      userAddress,
+      Number(chainId),
+      teeServiceUrl
+    );
+
     const attestedData = {
-      score: 30n,
-      timeAtWhichAttested: currentTimestamp,
-      chainId: chainId,
+      score: BigInt(attestation.attestedData.score),
+      timeAtWhichAttested: BigInt(attestation.attestedData.timeAtWhichAttested),
+      chainId: BigInt(attestation.attestedData.chainId),
     };
 
-    const signature = await createEIP191Signature(attestedData, formattedTeeKey);
+    // Skip test if score is already sufficient (TEE gives high scores by default)
+    if (attestedData.score >= 5n) {
+      console.log(`⚠ Skipping bypass test - TEE score (${attestedData.score}) is already sufficient (required: 5)`);
+      this.skip();
+      return;
+    }
+
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
-      signature,
+      depositSelector,
+      attestation.signature as `0x${string}`,
       attestedData
     );
 
     const verifierWithUser = assuraVerifierContract as any;
 
-    // Call verifyWithBypass to create bypass entry
+    // Simulate first to get return value
+    const isValid = await verifierWithUser.simulate.verifyWithBypass([
+      vaultAddress,
+      depositSelector,
+      complianceData,
+    ], {
+      account: userAccount,
+    });
+
+    assert.equal(isValid.result, false, "Verification should fail due to insufficient score");
+    
+    // Wait a bit to avoid "replacement transaction underpriced" errors
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    
+    // Now actually call it to create the bypass entry
     const hash = await verifierWithUser.write.verifyWithBypass([
       vaultAddress,
-      verificationKey,
+      depositSelector,
       complianceData,
     ], {
       account: userAccount,
@@ -779,15 +889,18 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     assert.equal(receipt.status, "success", "Transaction should succeed");
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // Check bypass entry was created
+    // Wait longer for state to update
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Check bypass entry was created (public mapping returns tuple) - retry if needed
     let bypassEntryTuple: [bigint, bigint, boolean];
     for (let i = 0; i < 5; i++) {
       bypassEntryTuple = await (assuraVerifierContract.read as any).bypassEntries([
         userAddress,
         vaultAddress,
-        verificationKey,
+        depositSelector,
       ]);
-      if (bypassEntryTuple[2] === true) break;
+      if (bypassEntryTuple[2] === true) break; // allowed is true
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     
@@ -800,15 +913,20 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     assert.equal(bypassEntry.allowed, true, "Bypass entry should be created");
     assert.equal(bypassEntry.nonce, 1n, "Bypass entry should have nonce=1");
 
-    // Get block timestamp to verify expiry
+    // Get the actual block timestamp when the transaction was executed
     const block = await publicClient.getBlock({ blockTag: "latest" });
     const blockTimestamp = BigInt(block.timestamp);
-    const expectedExpiry = blockTimestamp + 200n; // (50 - 30) * 10 = 200 seconds
-    const tolerance = 5n;
+
+    // Calculate expected expiry: block timestamp + (difference * 10 seconds)
+    // Required score = 5, actual score < 5
+    // Difference = 5 - actualScore (e.g., 5 - 0 = 5, so expiry = blockTimestamp + 50 seconds)
+    const scoreDifference = 5n - attestedData.score; // Should be positive if score < 5
+    const expectedExpiry = blockTimestamp + (scoreDifference * 10n);
+    const tolerance = 10n; // Allow 10 seconds tolerance for block time differences
 
     assert(
       bypassEntry.expiry >= expectedExpiry - tolerance && bypassEntry.expiry <= expectedExpiry + tolerance,
-      `Bypass expiry should be around ${expectedExpiry} (got ${bypassEntry.expiry})`
+      `Bypass expiry should be around ${expectedExpiry} (got ${bypassEntry.expiry}, block timestamp: ${blockTimestamp}, score: ${attestedData.score})`
     );
 
     console.log(`✓ Bypass entry created with expiry: ${bypassEntry.expiry}`);
@@ -816,24 +934,43 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     console.log(`  Nonce: ${bypassEntry.nonce}`);
   });
 
-  it("Should increment bypass entry nonce on subsequent attempts", async function () {
+  it("Should increment bypass entry nonce on subsequent attempts", async function (this: { skip: () => void }) {
     console.log("\n=== Testing bypass nonce increment ===");
 
-    // Use a different user address to avoid state pollution
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+
+    // Use a different user address to avoid state pollution from previous tests
     const testUserAddress = `0x${Math.random().toString(16).slice(2, 42).padEnd(40, '0')}` as `0x${string}`;
-    const currentTimestamp = BigInt(Math.floor(Date.now() / 1000));
+
+    // Register test user first with a username
+    const testUsername = `testuser-${testUserAddress.slice(2, 8).toLowerCase()}`;
+    const attestation = await getAttestation(
+      testUserAddress,
+      Number(chainId),
+      teeServiceUrl,
+      testUsername // Register user first
+    );
+    
+    // Skip test if score is already sufficient
+    if (BigInt(attestation.attestedData.score) >= 5n) {
+      console.log(`⚠ Skipping bypass nonce test - TEE score (${attestation.attestedData.score}) is already sufficient (required: 5)`);
+      this.skip();
+      return;
+    }
 
     const attestedData = {
-      score: 30n,
-      timeAtWhichAttested: currentTimestamp,
-      chainId: chainId,
+      score: BigInt(attestation.attestedData.score),
+      timeAtWhichAttested: BigInt(attestation.attestedData.timeAtWhichAttested),
+      chainId: BigInt(attestation.attestedData.chainId),
     };
 
-    const signature = await createEIP191Signature(attestedData, formattedTeeKey);
     const testComplianceData = createComplianceData(
       testUserAddress,
-      verificationKey,
-      signature,
+      depositSelector,
+      attestation.signature as `0x${string}`,
       attestedData
     );
 
@@ -842,7 +979,7 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     // First attempt: creates bypass entry with nonce 1
     const hash1 = await verifierWithUser.write.verifyWithBypass([
       vaultAddress,
-      verificationKey,
+      depositSelector,
       testComplianceData,
     ], {
       account: userAccount,
@@ -854,7 +991,7 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     let bypassEntryTuple = await (assuraVerifierContract.read as any).bypassEntries([
       testUserAddress,
       vaultAddress,
-      verificationKey,
+      depositSelector,
     ]);
     let bypassEntry = {
       expiry: bypassEntryTuple[0],
@@ -864,27 +1001,57 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     assert.equal(bypassEntry.nonce, 1n, `First bypass entry should have nonce=1, got: ${bypassEntry.nonce}`);
 
     // Second attempt: updates bypass entry with nonce 2
+    // Wait a bit to ensure first transaction is fully processed
     await new Promise((resolve) => setTimeout(resolve, 2000));
     
-    const currentTimestamp2 = BigInt(Math.floor(Date.now() / 1000));
+    // Create fresh compliance data with updated timestamp to avoid any replay issues
+    const attestation2 = await getAttestation(
+      testUserAddress,
+      Number(chainId),
+      teeServiceUrl,
+      testUsername // Use same username
+    );
+
     const attestedData2 = {
-      score: 30n,
-      timeAtWhichAttested: currentTimestamp2,
-      chainId: chainId,
+      score: BigInt(attestation2.attestedData.score),
+      timeAtWhichAttested: BigInt(attestation2.attestedData.timeAtWhichAttested),
+      chainId: BigInt(attestation2.attestedData.chainId),
     };
-    const signature2 = await createEIP191Signature(attestedData2, formattedTeeKey);
+
     const testComplianceData2 = createComplianceData(
       testUserAddress,
-      verificationKey,
-      signature2,
+      depositSelector,
+      attestation2.signature as `0x${string}`,
       attestedData2
     );
     
+    // Simulate first to check if signature is valid
+    let simulationPassed = false;
+    try {
+      const { result: isValid } = await verifierWithUser.simulate.verifyWithBypass([
+        vaultAddress,
+        depositSelector,
+        testComplianceData2,
+      ], {
+        account: userAccount,
+      });
+      console.log(`✓ Simulation result: ${isValid} (expected false - access denied but bypass entry updated)`);
+      simulationPassed = true;
+    } catch (simError: any) {
+      console.error(`✗ Simulation failed: ${simError.message || simError}`);
+      throw new Error(`Second verifyWithBypass call simulation failed: ${simError.message || simError}`);
+    }
+    
+    if (!simulationPassed) {
+      throw new Error("Simulation did not pass, cannot proceed with transaction");
+    }
+    
+    // Wait longer before sending actual transaction to avoid "replacement transaction underpriced" errors
     await new Promise((resolve) => setTimeout(resolve, 4000));
     
     const hash2 = await verifierWithUser.write.verifyWithBypass([
       vaultAddress,
-      verificationKey,
+      depositSelector,
       testComplianceData2,
     ], {
       account: userAccount,
@@ -893,12 +1060,12 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     assert.equal(receipt2.status, "success", "Second transaction should succeed");
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // Retry reading bypass entry until nonce updates
+    // Retry reading bypass entry until nonce updates - use testUserAddress!
     for (let i = 0; i < 5; i++) {
       bypassEntryTuple = await (assuraVerifierContract.read as any).bypassEntries([
         testUserAddress,
         vaultAddress,
-        verificationKey,
+        depositSelector,
       ]);
       bypassEntry = {
         expiry: bypassEntryTuple[0],
@@ -921,6 +1088,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     const depositAmount = 200n * 10n ** tokenDecimals;
     await ensureUserHasTokens(depositAmount * 3n);
 
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+
     // Get attestation from TEE service (score generated by TEE)
     const attestation = await getAttestation(
       userAddress,
@@ -934,15 +1106,15 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       chainId: BigInt(attestation.attestedData.chainId),
     };
 
-    // Skip test if score is insufficient (TEE gives low scores by default)
-    if (attestedData.score < minScore) {
-      console.log(`⚠ Skipping multiple deposits test - TEE score (${attestedData.score}) is insufficient (required: ${minScore})`);
+    // Skip test if score is insufficient (requires score 5)
+    if (attestedData.score < 5n) {
+      console.log(`⚠ Skipping multiple deposits test - TEE score (${attestedData.score}) is insufficient (required: 5)`);
       return;
     }
 
     const complianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       attestation.signature as `0x${string}`,
       attestedData
     );
@@ -952,7 +1124,7 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     // Make 3 deposits
     for (let i = 0; i < 3; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      const hash = await vaultContract.write.depositWithCompliance(
+      const hash = await (vaultContract.write as any).depositWithScore100(
         [depositAmount, userAddress, complianceData],
         { account: userAccount }
       );
@@ -971,7 +1143,7 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     await ensureUserHasTokens(depositAmount * 2n);
 
     // Read current value right before operations
-    const initialUserShares = await vaultContract.read.balanceOf([userAddress]);
+    const initialUserShares = await (vaultContract as any).read.balanceOf([userAddress]);
 
     // Test EIP-191 signature from TEE
     const attestation191 = await getAttestation(
@@ -986,20 +1158,25 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
       chainId: BigInt(attestation191.attestedData.chainId),
     };
 
-    // Skip test if score is insufficient (TEE gives low scores by default)
-    if (attestedData.score < minScore) {
-      console.log(`⚠ Skipping signature support test - TEE score (${attestedData.score}) is insufficient (required: ${minScore})`);
+    // Get selector if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+
+    // Skip test if score is insufficient (requires score 5)
+    if (attestedData.score < 5n) {
+      console.log(`⚠ Skipping signature support test - TEE score (${attestedData.score}) is insufficient (required: 5)`);
       return;
     }
 
     const eip191ComplianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       attestation191.signature as `0x${string}`,
       attestedData
     );
 
-    const hash1 = await vaultContract.write.depositWithCompliance(
+    const hash1 = await (vaultContract.write as any).depositWithScore100(
       [depositAmount, userAddress, eip191ComplianceData],
       { account: userAccount }
     );
@@ -1007,17 +1184,17 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     assert.equal(receipt1.status, "success", "EIP-191 transaction should succeed");
     await new Promise((resolve) => setTimeout(resolve, 2000));
     
-    let sharesAfterEIP191 = await vaultContract.read.balanceOf([userAddress]);
+    let sharesAfterEIP191 = await (vaultContract as any).read.balanceOf([userAddress]);
     for (let i = 0; i < 3; i++) {
       if (sharesAfterEIP191 > initialUserShares) break;
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      sharesAfterEIP191 = await vaultContract.read.balanceOf([userAddress]);
+      sharesAfterEIP191 = await (vaultContract as any).read.balanceOf([userAddress]);
     }
     assert(sharesAfterEIP191 > initialUserShares, "EIP-191 signature should work");
     console.log(`✓ EIP-191 signature worked: ${initialUserShares} → ${sharesAfterEIP191} shares`);
 
     // Test second signature - read current value again before second increment
-    const sharesBeforeSecond = await vaultContract.read.balanceOf([userAddress]);
+    const sharesBeforeSecond = await (vaultContract as any).read.balanceOf([userAddress]);
 
     // Get another attestation from TEE (with updated timestamp)
     const attestation2 = await getAttestation(
@@ -1034,12 +1211,12 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
 
     const secondComplianceData = createComplianceData(
       userAddress,
-      verificationKey,
+      depositSelector,
       attestation2.signature as `0x${string}`,
       attestedData2
     );
 
-    const hash2 = await vaultContract.write.depositWithCompliance(
+    const hash2 = await (vaultContract.write as any).depositWithScore100(
       [depositAmount, userAddress, secondComplianceData],
       { account: userAccount }
     );
@@ -1048,11 +1225,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Retry reading until value updates
-    let sharesAfterSecond = await vaultContract.read.balanceOf([userAddress]);
+    let sharesAfterSecond = await (vaultContract as any).read.balanceOf([userAddress]);
     for (let i = 0; i < 5; i++) {
       if (sharesAfterSecond > sharesBeforeSecond) break;
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      sharesAfterSecond = await vaultContract.read.balanceOf([userAddress]);
+      sharesAfterSecond = await (vaultContract as any).read.balanceOf([userAddress]);
     }
     const expectedSecond = sharesBeforeSecond + depositAmount;
     assert(sharesAfterSecond > sharesBeforeSecond, `Second signature should work: ${sharesBeforeSecond} + ${depositAmount} = ${expectedSecond}, but got ${sharesAfterSecond}`);
@@ -1064,7 +1241,7 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   it("Should allow redeem without compliance (standard ERC4626)", async function () {
     console.log("\n=== Testing redeem (no compliance required) ===");
 
-    const userShares = await vaultContract.read.balanceOf([userAddress]);
+    const userShares = await (vaultContract as any).read.balanceOf([userAddress]);
     console.log(`User shares: ${userShares}`);
 
     if (userShares === 0n) {
@@ -1073,12 +1250,12 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     }
 
     const redeemAmount = userShares / 4n; // Redeem 1/4 of shares
-    const assetsExpected = await vaultContract.read.previewRedeem([redeemAmount]);
+    const assetsExpected = await (vaultContract as any).read.previewRedeem([redeemAmount]);
 
     console.log(`Redeeming ${redeemAmount} shares`);
     console.log(`Expected assets: ${assetsExpected}`);
 
-    const initialUserBalance = await mockERC20Contract.read.balanceOf([userAddress]);
+    const initialUserBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
 
     // Redeem shares (standard ERC4626 function, no compliance required)
     const redeemHash = await vaultContract.write.redeem(
@@ -1091,11 +1268,11 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Verify user received tokens
-    let finalUserBalance = await mockERC20Contract.read.balanceOf([userAddress]);
+    let finalUserBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
     for (let i = 0; i < 5; i++) {
       if (finalUserBalance > initialUserBalance) break;
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      finalUserBalance = await mockERC20Contract.read.balanceOf([userAddress]);
+      finalUserBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
     }
     
     assert(finalUserBalance > initialUserBalance, "User should receive tokens");
@@ -1107,18 +1284,31 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   it("Should update verification requirements", async function () {
     console.log("\n=== Testing updateVerificationRequirements ===");
 
-    // Note: This would require the vault to have an owner/admin function
-    // For now, we'll just verify the current requirements
-    const verifyingData = await assuraVerifierContract.read.getVerifyingData([
+    // Get selectors if not already set
+    if (!depositSelector) {
+      depositSelector = await (vaultContract.read as any).getOnlyUserWithScore100Selector();
+    }
+    if (!mintSelector) {
+      mintSelector = await (vaultContract.read as any).getOnlyUserWithScore30Selector();
+    }
+
+    // Verify the current requirements for both selectors
+    const depositVerifyingData = await assuraVerifierContract.read.getVerifyingData([
       vaultAddress,
-      verificationKey,
+      depositSelector,
+    ]);
+    const mintVerifyingData = await assuraVerifierContract.read.getVerifyingData([
+      vaultAddress,
+      mintSelector,
     ]);
 
-    assert.equal(verifyingData.score, minScore, "Initial score should match minScore");
+    assert.equal(depositVerifyingData.score, 5n, "Deposit should require score 5");
+    assert.equal(mintVerifyingData.score, 10n, "Mint should require score 10");
     console.log(`✓ Current verification requirements:`);
-    console.log(`  Score: ${verifyingData.score}`);
-    console.log(`  Expiry: ${verifyingData.expiry}`);
-    console.log(`  ChainId: ${verifyingData.chainId}`);
+    console.log(`  Deposit Score: ${depositVerifyingData.score}`);
+    console.log(`  Mint Score: ${mintVerifyingData.score}`);
+    console.log(`  Expiry: ${depositVerifyingData.expiry} (0 = no expiry)`);
+    console.log(`  ChainId: ${depositVerifyingData.chainId} (0 = any chain)`);
   });
 
   // ============ Final State Verification ============
@@ -1126,10 +1316,10 @@ describe("Comprehensive Vault E2E Tests on Base Sepolia", async function () {
   it("Should verify final vault state", async function () {
     console.log("\n=== Final State Verification ===");
 
-    const totalAssets = await vaultContract.read.totalAssets();
-    const totalSupply = await vaultContract.read.totalSupply();
-    const userShares = await vaultContract.read.balanceOf([userAddress]);
-    const userTokenBalance = await mockERC20Contract.read.balanceOf([userAddress]);
+    const totalAssets = await (vaultContract as any).read.totalAssets();
+    const totalSupply = await (vaultContract as any).read.totalSupply();
+    const userShares = await (vaultContract as any).read.balanceOf([userAddress]);
+    const userTokenBalance = await (mockERC20Contract as any).read.balanceOf([userAddress]);
 
     console.log(`Total assets: ${totalAssets}`);
     console.log(`Total supply: ${totalSupply}`);

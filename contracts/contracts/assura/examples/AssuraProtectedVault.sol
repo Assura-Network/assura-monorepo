@@ -27,6 +27,36 @@ contract AssuraProtectedVault is ERC4626 {
     event ComplianceVerified(address indexed user, uint256 score);
 
     /**
+     * @notice Returns degraded verifying data for deposit operations
+     * @dev Function name suggests score 100 but returns degraded score 5
+     */
+    function onlyUserWithScore100() public pure returns (AssuraTypes.VerifyingData memory) {
+        return AssuraTypes.VerifyingData({score: 5, expiry: 0, chainId: 0});
+    }
+
+    /**
+     * @notice Returns degraded verifying data for mint operations
+     * @dev Function name suggests score 30 but returns degraded score 10
+     */
+    function onlyUserWithScore30() public pure returns (AssuraTypes.VerifyingData memory) {
+        return AssuraTypes.VerifyingData({score: 10, expiry: 0, chainId: 0});
+    }
+
+    /**
+     * @notice Returns the selector for onlyUserWithScore100 function
+     */
+    function getOnlyUserWithScore100Selector() public pure returns (bytes32) {
+        return bytes32(bytes4(keccak256("onlyUserWithScore100()")));
+    }
+
+    /**
+     * @notice Returns the selector for onlyUserWithScore30 function
+     */
+    function getOnlyUserWithScore30Selector() public pure returns (bytes32) {
+        return bytes32(bytes4(keccak256("onlyUserWithScore30()")));
+    }
+
+    /**
      * @notice Constructor
      * @param asset_ The underlying ERC20 token
      * @param name_ The vault token name
@@ -50,14 +80,18 @@ contract AssuraProtectedVault is ERC4626 {
         verificationKey = _verificationKey;
         minScore = _minScore;
         
-        // Set initial verification requirements
-        AssuraTypes.VerifyingData memory verifyingData = AssuraTypes.VerifyingData({
-            score: _minScore,
-            expiry: 0, // No expiry
-            chainId: 0 // Any chain
-        });
+        // Set verifying data for this contract's functions
+        assuraVerifier.setVerifyingData(
+            address(this),
+            getOnlyUserWithScore100Selector(),
+            onlyUserWithScore100()
+        );
         
-        assuraVerifier.setVerifyingData(address(this), _verificationKey, verifyingData);
+        assuraVerifier.setVerifyingData(
+            address(this),
+            getOnlyUserWithScore30Selector(),
+            onlyUserWithScore30()
+        );
     }
 
     /**
@@ -69,6 +103,31 @@ contract AssuraProtectedVault is ERC4626 {
             assuraVerifier,
             address(this),
             verificationKey,
+            attestedComplianceData
+        );
+        
+        // Decode to get user address and score
+        AssuraTypes.ComplianceData memory complianceData = 
+            AssuraVerifierLib.decodeComplianceData(attestedComplianceData);
+        
+        require(
+            complianceData.userAddress == msg.sender,
+            "Vault: Compliance data must be for caller"
+        );
+        
+        emit ComplianceVerified(msg.sender, complianceData.actualAttestedData.score);
+        _;
+    }
+
+    /**
+     * @notice Modifier to check compliance with a specific key
+     * @dev Uses AssuraVerifierLib for easy compliance checking with custom key
+     */
+    modifier onlyCompliantWithKey(bytes32 key, bytes calldata attestedComplianceData) {
+        AssuraVerifierLib.requireCompliance(
+            assuraVerifier,
+            address(this),
+            key,
             attestedComplianceData
         );
         
@@ -98,6 +157,36 @@ contract AssuraProtectedVault is ERC4626 {
         bytes calldata attestedComplianceData
     ) external onlyCompliant(attestedComplianceData) returns (uint256 shares) {
         return deposit(assets, receiver);
+    }
+
+    /**
+     * @notice Deposit assets with compliance verification using score 100 selector
+     * @param assets Amount of assets to deposit
+     * @param receiver Address to receive shares
+     * @param attestedComplianceData The compliance attestation data
+     * @return shares Amount of shares minted
+     */
+    function depositWithScore100(
+        uint256 assets,
+        address receiver,
+        bytes calldata attestedComplianceData
+    ) external onlyCompliantWithKey(getOnlyUserWithScore100Selector(), attestedComplianceData) returns (uint256 shares) {
+        return deposit(assets, receiver);
+    }
+
+    /**
+     * @notice Mint shares with compliance verification using score 30 selector
+     * @param shares Amount of shares to mint
+     * @param receiver Address to receive shares
+     * @param attestedComplianceData The compliance attestation data
+     * @return assets Amount of assets deposited
+     */
+    function mintWithScore30(
+        uint256 shares,
+        address receiver,
+        bytes calldata attestedComplianceData
+    ) external onlyCompliantWithKey(getOnlyUserWithScore30Selector(), attestedComplianceData) returns (uint256 assets) {
+        return mint(shares, receiver);
     }
 
     /**

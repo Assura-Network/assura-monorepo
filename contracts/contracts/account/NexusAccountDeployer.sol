@@ -69,20 +69,21 @@ contract NexusAccountDeployer {
      * @param owner The address that will own the Nexus account
      * @param salt The salt to use for deployment
      * @return account The address of the deployed account
+     * @dev Allows multiple accounts per owner when using different salts
      */
     function deployAccountWithSalt(
         address owner,
         bytes32 salt
     ) public returns (address payable account) {
         require(owner != address(0), "Owner cannot be zero address");
-        require(deployedAccounts[owner] == address(0), "Account already deployed for this owner");
 
         bytes memory initData = _buildInitData(owner);
 
         // Deploy the account via factory
         account = NexusAccountFactory(FACTORY).createAccount(initData, salt);
 
-        // Store the deployed account
+        // Store the deployed account (last one deployed)
+        // Note: This will overwrite if multiple accounts are deployed
         deployedAccounts[owner] = account;
 
         emit AccountDeployed(owner, account, salt);

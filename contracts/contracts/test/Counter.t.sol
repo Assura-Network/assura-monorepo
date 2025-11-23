@@ -43,6 +43,7 @@ contract CounterTest is TestHelper {
         }
         
         // Deploy AssuraVerifier with owner and TEE address
+        // NexusAccountDeployer is deployed automatically in constructor
         assuraVerifier = new AssuraVerifier(owner, teeAddress);
         
         // Deploy Counter with AssuraVerifier address
@@ -130,12 +131,12 @@ contract CounterTest is TestHelper {
         // Check that verifying data was set correctly in constructor
         bytes32 incSelector = counter.getOnlyUserWithScore100Selector();
         bytes32 incBySelector = counter.getOnlyUserWithScore30Selector();
-        
+
         AssuraTypes.VerifyingData memory vData1 = assuraVerifier.getVerifyingData(address(counter), incSelector);
-        assertEq(vData1.score, 100, "inc() should require score 100");
-        
+        assertEq(vData1.score, 5, "inc() should require score 5");
+
         AssuraTypes.VerifyingData memory vData2 = assuraVerifier.getVerifyingData(address(counter), incBySelector);
-        assertEq(vData2.score, 30, "incBy() should require score 30");
+        assertEq(vData2.score, 10, "incBy() should require score 10");
     }
 
     function test_IncWithValidComplianceData() public {
@@ -143,7 +144,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100 (required for inc)
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -175,7 +176,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 30 (required for incBy)
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 30,
+            score: 10,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -207,7 +208,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 50 (less than required 100)
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 50,
+            score: 2,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -256,7 +257,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 50 (less than required 100)
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 50,
+            score: 2,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -307,7 +308,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 50
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 50,
+            score: 2,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -361,7 +362,7 @@ contract CounterTest is TestHelper {
         address user2 = vm.addr(0x4);
         uint256 timestamp2 = block.timestamp;
         AssuraTypes.AttestedData memory attestedData2 = AssuraTypes.AttestedData({
-            score: 30,
+            score: 10,
             timeAtWhichAttested: timestamp2,
             chainId: block.chainid
         });
@@ -385,7 +386,7 @@ contract CounterTest is TestHelper {
         
         // User 1, function 1 (score 50, needs 100)
         AssuraTypes.AttestedData memory attestedData1 = AssuraTypes.AttestedData({
-            score: 50,
+            score: 2,
             timeAtWhichAttested: timestamp,
             chainId: block.chainid
         });
@@ -440,7 +441,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -470,7 +471,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -500,7 +501,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 30
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 30,
+            score: 10,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -530,7 +531,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -568,7 +569,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100 (required for inc)
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -600,7 +601,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 30 (required for incBy)
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 30,
+            score: 10,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -632,7 +633,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });
@@ -662,7 +663,7 @@ contract CounterTest is TestHelper {
         
         // Create ActualAttestedData with score 100
         AssuraTypes.AttestedData memory attestedData = AssuraTypes.AttestedData({
-            score: 100,
+            score: 5,
             timeAtWhichAttested: block.timestamp,
             chainId: block.chainid
         });

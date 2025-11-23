@@ -238,6 +238,7 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
     console.log("\n=== Deploying AssuraVerifier ===");
     console.log(`Owner: ${ownerAddress}`);
     console.log(`TEE Address: ${teeAddress}`);
+    console.log(`NexusAccountDeployer: Will be deployed automatically`);
 
     const assuraVerifier = await viem.deployContract("AssuraVerifier", [
       ownerAddress,
@@ -261,11 +262,13 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
     // Verify deployment with retries
     let owner: `0x${string}`;
     let teeAddr: `0x${string}`;
+    let nexusDeployer: `0x${string}`;
     for (let i = 0; i < 5; i++) {
       try {
         owner = await assuraVerifierContract.read.owner();
         teeAddr = await assuraVerifierContract.read.ASSURA_TEE_ADDRESS();
-        if (owner && teeAddr) break;
+        nexusDeployer = await assuraVerifierContract.read.getNexusAccountDeployer() as `0x${string}`;
+        if (owner && teeAddr && nexusDeployer) break;
       } catch (error) {
         if (i === 4) throw error;
         await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -274,6 +277,9 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
 
     assert.equal(owner!.toLowerCase(), ownerAddress.toLowerCase());
     assert.equal(teeAddr!.toLowerCase(), teeAddress.toLowerCase());
+    assert.notEqual(nexusDeployer!, "0x0000000000000000000000000000000000000000");
+
+    console.log(`✓ NexusAccountDeployer deployed at: ${nexusDeployer}`);
   });
 
   it("Should deploy Counter contract", async function () {

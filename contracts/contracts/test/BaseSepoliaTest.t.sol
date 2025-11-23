@@ -60,7 +60,8 @@ contract BaseSepoliaTest is TestHelper {
         // Deploy contracts
         // Note: These will be actual deployments on Base Sepolia
         vm.startBroadcast();
-        
+
+        // NexusAccountDeployer is deployed automatically in constructor
         assuraVerifier = new AssuraVerifier(owner, teeAddress);
         counter = new Counter(address(assuraVerifier));
         

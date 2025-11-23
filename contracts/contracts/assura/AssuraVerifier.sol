@@ -6,6 +6,12 @@ import {AssuraTypes} from "./types/AssuraTypes.sol";
 import {AssuraVerifierLib} from "./libraries/AssuraVerifierLib.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {NexusAccountDeployer} from "../account/NexusAccountDeployer.sol";
+
+interface INexusAccountDeployer {
+    function deployAccountWithSalt(address owner, bytes32 salt) external returns (address payable account);
+    function predictAccountAddressWithSalt(address owner, bytes32 salt) external view returns (address predictedAddress);
+}
 
 /**
  * @title AssuraVerifier
@@ -25,8 +31,14 @@ contract AssuraVerifier is IAssuraVerifier, EIP712, Ownable {
     /// @dev Address of the Assura TEE that signs attestations
     address public ASSURA_TEE_ADDRESS;
 
+    /// @dev Address of the NexusAccountDeployer contract
+    INexusAccountDeployer public nexusAccountDeployer;
+
     /// @dev Emitted when TEE address is updated
     event AssuraTeeAddressUpdated(address oldAddress, address newAddress);
+
+    /// @dev Emitted when NexusAccountDeployer address is updated
+    event NexusAccountDeployerUpdated(address oldAddress, address newAddress);
 
     /// @dev Emitted when verifying data is set
     event VerifyingDataSet(
@@ -44,17 +56,32 @@ contract AssuraVerifier is IAssuraVerifier, EIP712, Ownable {
         uint256 nonce
     );
 
+    /// @dev Emitted when a Nexus account is deployed during bypass
+    event NexusAccountDeployedOnBypass(
+        address indexed userAddress,
+        address indexed nexusAccount,
+        bytes32 salt,
+        uint256 expiry
+    );
+
     /**
      * @notice Constructor
      * @param _owner The owner of the contract
      * @param _ASSURA_TEE_ADDRESS The address of the Assura TEE
+     * @dev Automatically deploys a NexusAccountDeployer for automatic account creation during bypass
      */
-    constructor(address _owner, address _ASSURA_TEE_ADDRESS) 
+    constructor(
+        address _owner,
+        address _ASSURA_TEE_ADDRESS
+    )
         EIP712("AssuraVerifier", "1")
         Ownable(_owner)
     {
         require(_ASSURA_TEE_ADDRESS != address(0), "AssuraVerifier: TEE address cannot be 0");
         ASSURA_TEE_ADDRESS = _ASSURA_TEE_ADDRESS;
+
+        // Deploy NexusAccountDeployer for automatic account creation
+        nexusAccountDeployer = INexusAccountDeployer(address(new NexusAccountDeployer()));
     }
 
     /**
@@ -130,20 +157,20 @@ contract AssuraVerifier is IAssuraVerifier, EIP712, Ownable {
         if (createBypassIfNeeded && complianceData.actualAttestedData.score < vData.score) {
             // Calculate score difference (0-100 scale)
             uint256 scoreDifference = vData.score - complianceData.actualAttestedData.score;
-            
+
             // Calculate expiry: current time + (difference * 10 seconds)
             uint256 expiry = block.timestamp + (scoreDifference * 10 seconds);
-            
+
             // Get current bypass entry to increment nonce
             uint256 newNonce = bypass.nonce + 1;
-            
+
             // Create or update bypass entry
             bypassEntries[complianceData.userAddress][app][key] = AssuraTypes.BypassData({
                 expiry: expiry,
                 nonce: newNonce,
                 allowed: true
             });
-            
+
             emit BypassEntryCreated(
                 complianceData.userAddress,
                 app,
@@ -151,6 +178,36 @@ contract AssuraVerifier is IAssuraVerifier, EIP712, Ownable {
                 expiry,
                 newNonce
             );
+
+            // Deploy Nexus account if NexusAccountDeployer is configured
+            if (address(nexusAccountDeployer) != address(0)) {
+                // Generate random salt using user address, timestamp, nonce, and app address
+                bytes32 randomSalt = keccak256(
+                    abi.encodePacked(
+                        complianceData.userAddress,
+                        block.timestamp,
+                        newNonce,
+                        app,
+                        key
+                    )
+                );
+
+                // Try to deploy the account (will revert if already deployed)
+                try nexusAccountDeployer.deployAccountWithSalt(
+                    complianceData.userAddress,
+                    randomSalt
+                ) returns (address payable nexusAccount) {
+                    emit NexusAccountDeployedOnBypass(
+                        complianceData.userAddress,
+                        nexusAccount,
+                        randomSalt,
+                        expiry
+                    );
+                } catch {
+                    // If deployment fails (e.g., account already exists), silently continue
+                    // The bypass entry is still created successfully
+                }
+            }
         }
         
         return false;
@@ -244,5 +301,24 @@ contract AssuraVerifier is IAssuraVerifier, EIP712, Ownable {
         address oldAddress = ASSURA_TEE_ADDRESS;
         ASSURA_TEE_ADDRESS = _ASSURA_TEE_ADDRESS;
         emit AssuraTeeAddressUpdated(oldAddress, _ASSURA_TEE_ADDRESS);
+    }
+
+    /**
+     * @notice Get the NexusAccountDeployer address
+     * @return The address of the NexusAccountDeployer contract
+     */
+    function getNexusAccountDeployer() external view returns (address) {
+        return address(nexusAccountDeployer);
+    }
+
+    /**
+     * @notice Update the NexusAccountDeployer address
+     * @dev Only the owner can update the deployer address
+     * @param _nexusAccountDeployer The new NexusAccountDeployer address (can be address(0) to disable)
+     */
+    function updateNexusAccountDeployer(address _nexusAccountDeployer) external onlyOwner {
+        address oldAddress = address(nexusAccountDeployer);
+        nexusAccountDeployer = INexusAccountDeployer(_nexusAccountDeployer);
+        emit NexusAccountDeployerUpdated(oldAddress, _nexusAccountDeployer);
     }
 }
