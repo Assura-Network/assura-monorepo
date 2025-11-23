@@ -45,13 +45,15 @@ async function commitAndPush(results, timestamp) {
   try {
     // Ensure we're on main branch
     await git.checkout(BRANCH_NAME);
-    
+
     // Stash any unstaged changes first
     const status = await git.status();
     if (status.files.length > 0) {
       try {
         await git.stash(["push", "-m", "Auto-stash before pull"]);
-        console.log(`[GitHub PR] Stashed ${status.files.length} uncommitted changes`);
+        console.log(
+          `[GitHub PR] Stashed ${status.files.length} uncommitted changes`
+        );
       } catch (error) {
         // Ignore stash errors if nothing to stash
       }
@@ -130,7 +132,9 @@ async function commitAndPush(results, timestamp) {
       );
     } catch (error) {
       // If upstream push fails, try origin (but log warning)
-      console.warn(`[GitHub PR] Failed to push to upstream, trying origin: ${error.message}`);
+      console.warn(
+        `[GitHub PR] Failed to push to upstream, trying origin: ${error.message}`
+      );
       await git.push("origin", BRANCH_NAME);
       console.log(`[GitHub PR] Pushed to origin instead`);
     }
