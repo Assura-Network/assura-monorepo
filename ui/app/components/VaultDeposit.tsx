@@ -234,7 +234,7 @@ export default function VaultDeposit() {
 
       {/* Deposit Dialog with Form */}
       <AlertDialog open={showDialog} onOpenChange={setShowDialog}>
-        <AlertDialogContent className="max-w-2xl rounded-3xl p-6">
+        <AlertDialogContent className="max-w-lg rounded-3xl p-6">
           <AlertDialogHeader className="mb-4">
             <div className="flex items-center gap-3 mb-1">
               <div className="relative w-10 h-10 rounded-full overflow-hidden">
