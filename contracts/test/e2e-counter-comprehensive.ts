@@ -67,7 +67,7 @@ describe("Comprehensive Counter E2E Tests on Base Sepolia", async function () {
   const userAddress = userAccount.address;
 
   // Fetch TEE address from TEE service
-  const teeServiceUrl = process.env.TEE_SERVICE_URL;
+  const teeServiceUrl = process.env.TEE_SERVICE_URL || "https://tee.assura.network";
   const teeAddress = (await getTeeAddress(teeServiceUrl)) as `0x${string}`;
 
   let assuraVerifierAddress: `0x${string}`;

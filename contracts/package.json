@@ -11,6 +11,7 @@
   "dependencies": {
     "@openzeppelin/contracts": "^5.4.0",
     "@openzeppelin/contracts-upgradeable": "^5.4.0",
+    "axios": "^1.7.9",
     "bcnmy-nexus": "github:bcnmy/nexus",
     "dotenv": "^17.2.3"
   },
