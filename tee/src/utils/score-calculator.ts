@@ -207,7 +207,12 @@ async function fetchWalletData(address: string, chainId: number = 1): Promise<Wa
 
   // Skip CryptoAPIs for testnets (they typically don't have good testnet support)
   if (isTestnet) {
-    console.log(`⚠️  Testnet detected (chainId: ${chainId}), skipping CryptoAPIs and using RPC fallback`);
+    console.log(`========================================`);
+    console.log(`⚠️  TESTNET DETECTED`);
+    console.log(`   ChainId: ${chainId}`);
+    console.log(`   Address: ${address}`);
+    console.log(`   Skipping CryptoAPIs, using RPC fallback`);
+    console.log(`========================================`);
     return fetchWalletDataFallback(address, chainId);
   }
 
@@ -249,6 +254,8 @@ async function fetchWalletData(address: string, chainId: number = 1): Promise<Wa
  * Used if CryptoAPIs fails or for testnets
  */
 async function fetchWalletDataFallback(address: string, chainId: number = 84532): Promise<WalletData> {
+  console.log(`📡 RPC Fallback started for address: ${address}, chainId: ${chainId}`);
+
   try {
     const { createPublicClient, http } = await import('viem');
     const { baseSepolia, sepolia, arbitrumSepolia, mainnet, base, arbitrum, polygon } = await import('viem/chains');
@@ -261,6 +268,7 @@ async function fetchWalletDataFallback(address: string, chainId: number = 84532)
       case 84532: // Base Sepolia
         chain = baseSepolia;
         rpcUrl = process.env.RPC_URL || 'https://sepolia.base.org';
+        console.log(`   Using Base Sepolia RPC: ${rpcUrl}`);
         break;
       case 11155111: // Ethereum Sepolia
         chain = sepolia;
@@ -303,6 +311,10 @@ async function fetchWalletDataFallback(address: string, chainId: number = 84532)
 
     // Get transaction count
     const txCount = await publicClient.getTransactionCount({ address: address as `0x${string}` });
+
+    console.log(`✅ RPC Fallback successful:`);
+    console.log(`   Balance: ${balance} ETH`);
+    console.log(`   TX Count: ${txCount}`);
 
     return {
       balance,
@@ -364,6 +376,11 @@ export async function calculateComplianceScore(
     dataSource: 'cryptoapis' | 'rpc-fallback';
   };
 }> {
+  console.log(`\n🔍 ========== CALCULATING COMPLIANCE SCORE ==========`);
+  console.log(`   User Address: ${userAddress}`);
+  console.log(`   Chain ID: ${chainId}`);
+  console.log(`   aKYC: ${aKYC}, eKYC: ${eKYC}`);
+
   // Fetch wallet data with fallback
   let walletData: WalletData;
   let dataSource: 'cryptoapis' | 'rpc-fallback' = 'cryptoapis';
@@ -387,6 +404,13 @@ export async function calculateComplianceScore(
   const aKYCScore = aKYC ? SCORING_WEIGHTS.aKYC : 0;
   const eKYCScore = eKYC ? SCORING_WEIGHTS.eKYC : 0;
 
+  console.log(`\n📊 Wallet Data Retrieved:`);
+  console.log(`   Balance: ${walletData.balance} ETH`);
+  console.log(`   TX Count: ${walletData.transactionCount}`);
+  console.log(`   TX Volume: ${walletData.transactionVolume} ETH`);
+  console.log(`   Wallet Age: ${walletData.walletAgeDays} days`);
+  console.log(`   Data Source: ${dataSource}`);
+
   // Wallet age score: linear scale up to threshold
   const ageRatio = Math.min(walletData.walletAgeDays / WALLET_AGE_THRESHOLD_DAYS, 1);
   const walletAgeScore = Math.floor(ageRatio * SCORING_WEIGHTS.walletAge);
@@ -405,6 +429,17 @@ export async function calculateComplianceScore(
 
   // Total score
   const totalScore = aKYCScore + eKYCScore + walletAgeScore + balanceScore + transactionCountScore + transactionVolumeScore;
+
+  console.log(`\n✨ Score Breakdown:`);
+  console.log(`   aKYC Score: ${aKYCScore}/${SCORING_WEIGHTS.aKYC}`);
+  console.log(`   eKYC Score: ${eKYCScore}/${SCORING_WEIGHTS.eKYC}`);
+  console.log(`   Wallet Age Score: ${walletAgeScore}/${SCORING_WEIGHTS.walletAge} (ratio: ${ageRatio.toFixed(2)})`);
+  console.log(`   Balance Score: ${balanceScore}/${SCORING_WEIGHTS.balance} (ratio: ${balanceRatio.toFixed(2)})`);
+  console.log(`   TX Count Score: ${transactionCountScore}/${SCORING_WEIGHTS.transactionCount} (ratio: ${txCountRatio.toFixed(2)})`);
+  console.log(`   TX Volume Score: ${transactionVolumeScore}/${SCORING_WEIGHTS.transactionVolume} (ratio: ${txVolumeRatio.toFixed(2)})`);
+  console.log(`   ════════════════════════════════════════`);
+  console.log(`   TOTAL SCORE: ${totalScore}/1000`);
+  console.log(`   ════════════════════════════════════════\n`);
 
   return {
     totalScore: Math.min(totalScore, 1000), // Cap at 1000
